@@ -1,0 +1,28 @@
+# ── Sensitive Data ──────────────────────────────────────────
+# API keys
+.env
+.env.example
+
+# User data files
+*.csv
+*.zip
+*.docx
+*.pptx
+
+# Extracted/output data
+data/
+
+# ── Extracted directories ──────────────────────────────────
+OneDrive_extracted/
+
+# ── System / IDE ───────────────────────────────────────────
+.gemini/
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+
+# ── Project docs (not part of scraper engine) ──────────────
+maerii_deep_dive.md
+candidate_screening_architecture.md
