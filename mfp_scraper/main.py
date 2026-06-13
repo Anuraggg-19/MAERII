@@ -4,7 +4,9 @@ CLI entry point for the MFP Knowledge Engine Data Enrichment Scraper.
 Usage:
     python -m mfp_scraper.main --prepare           # Parse CSV -> seed JSON
     python -m mfp_scraper.main --item "Wild Honey"  # Enrich a single item (for testing)
-    python -m mfp_scraper.main --all                # Enrich all 87 items
+    python -m mfp_scraper.main --all                # Enrich all 87 items (10 per batch)
+    python -m mfp_scraper.main --all --batch-size 15 # Custom batch size
+    python -m mfp_scraper.main --all --batch-size 0  # No batching (process all at once)
     python -m mfp_scraper.main --resume 15          # Resume from item #15
     python -m mfp_scraper.main --validate           # Validate existing enriched data
     python -m mfp_scraper.main --export csv         # Export enriched data to CSV
@@ -60,7 +62,10 @@ def cmd_enrich_all(args):
         prepare_seed_data()
 
     pipeline = EnrichmentPipeline()
-    results = pipeline.run(resume_from=args.resume or 0)
+    results = pipeline.run(
+        resume_from=args.resume or 0,
+        batch_size=args.batch_size,
+    )
 
     print(f"\n[OK] Enrichment complete! {len(results)} items processed.")
     print(f"   Output: {config.ENRICHED_JSON_PATH}")
@@ -134,7 +139,8 @@ def main():
 Examples:
   python -m mfp_scraper.main --prepare            # Step 1: Parse CSV
   python -m mfp_scraper.main --item "Wild Honey"   # Step 2: Test with one item
-  python -m mfp_scraper.main --all                 # Step 3: Run full enrichment
+  python -m mfp_scraper.main --all                 # Step 3: Run full enrichment (10/batch)
+  python -m mfp_scraper.main --all --batch-size 15  # Custom batch size
   python -m mfp_scraper.main --validate            # Check data quality
   python -m mfp_scraper.main --export csv          # Export to CSV
         """,
@@ -173,6 +179,12 @@ Examples:
         type=int,
         default=0,
         help="Resume enrichment from item number N (used with --all)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Number of items to process per batch (default: 10, 0 = no batching)",
     )
 
     args = parser.parse_args()
