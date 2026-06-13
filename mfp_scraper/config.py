@@ -18,6 +18,7 @@ load_dotenv(_env_path)
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # ── File paths ──────────────────────────────────────────────────────────────
 CSV_PATH = PROJECT_ROOT / "MFP_List_87_Items_Split.csv"
@@ -35,7 +36,16 @@ SEARCH_RESULTS_PER_QUERY = 5  # Top N results to fetch per search
 
 # -- LLM settings ------------------------------------------------------------
 # Models to try in order (falls back if quota is exhausted)
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
+
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
 GEMINI_MODEL = GEMINI_MODELS[0]  # Primary model
 LLM_TEMPERATURE = 0.2  # Low temperature for factual extraction
 LLM_MAX_RETRIES = 5
