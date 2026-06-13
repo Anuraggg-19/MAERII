@@ -77,6 +77,7 @@ class GeminiExtractor:
             )
         self.client = genai.Client(api_key=self.api_key)
         self._last_call_time = 0
+        self.exhausted_models = set()
 
     def _rate_limit(self):
         """Enforce delay between LLM calls."""
@@ -106,6 +107,9 @@ class GeminiExtractor:
 
         # Try each model in the fallback list
         for model_name in config.GEMINI_MODELS:
+            if model_name in self.exhausted_models:
+                continue
+                
             result = self._try_model(model_name, prompt, item["name"])
             if result is not None:
                 return result
@@ -151,9 +155,10 @@ class GeminiExtractor:
                     retry_match = re.search(r"retryDelay.*?(\d+)", error_str)
                     retry_secs = int(retry_match.group(1)) if retry_match else 10
 
-                    # If daily quota is at 0, skip to next model
-                    if "limit: 0" in error_str:
-                        print(f"  [!] {model_name}: daily quota exhausted, trying next model...")
+                    # If daily quota is exhausted, skip to next model permanently
+                    if "limit: 0" in error_str or "quota" in error_str.lower():
+                        print(f"  [!] {model_name}: daily quota exhausted, marking as permanently exhausted...")
+                        self.exhausted_models.add(model_name)
                         return None  # Signal to try next model
 
                     print(f"  [!] {model_name}: rate limited, waiting {retry_secs}s (attempt {attempt + 1})...")
@@ -241,4 +246,91 @@ class GeminiExtractor:
             data["confidence"] = {f: 0.5 for f in config.TARGET_FIELDS if f != "image_url"}
 
         return data
+
+
+class GroqExtractor(GeminiExtractor):
+    """Uses Groq to extract structured data from text. Inherits parsing logic from GeminiExtractor."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        import groq
+        self.api_key = api_key or config.GROQ_API_KEY
+        if not self.api_key:
+            raise ValueError(
+                "GROQ_API_KEY not set. Add it to your .env file. "
+                "Get a free key at https://console.groq.com/keys"
+            )
+        self.client = groq.Groq(api_key=self.api_key)
+        self._last_call_time = 0
+        self.exhausted_models = set()
+
+    def extract(self, item: dict, source_text: str) -> Optional[dict]:
+        """Override: use GROQ_MODELS instead of GEMINI_MODELS."""
+        if not source_text or len(source_text.strip()) < 50:
+            print(f"  [!] Insufficient source text for '{item['name']}'")
+            return None
+
+        prompt = EXTRACTION_PROMPT.format(
+            item_name=item["name"],
+            category=item.get("category", "Unknown"),
+            existing_scientific_name=item.get("scientific_name") or "Not available",
+            msp=item.get("msp") or "N/A",
+            existing_states=", ".join(item.get("states", [])) or "Not specified",
+            source_text=source_text[:12000],
+        )
+
+        for model_name in config.GROQ_MODELS:
+            if model_name in self.exhausted_models:
+                continue
+
+            result = self._try_model(model_name, prompt, item["name"])
+            if result is not None:
+                return result
+
+        print(f"  [FAIL] All Groq models exhausted for '{item['name']}'")
+        return None
+
+    def _try_model(self, model_name: str, prompt: str, item_name: str) -> Optional[dict]:
+        """Try extracting with a specific Groq model, with retries."""
+        for attempt in range(config.LLM_MAX_RETRIES):
+            try:
+                self._rate_limit()
+
+                response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a precise data extraction AI. Always output valid JSON only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=config.LLM_TEMPERATURE,
+                    max_tokens=8192,
+                    response_format={"type": "json_object"},
+                )
+
+                raw_text = response.choices[0].message.content.strip()
+                if not raw_text:
+                    print(f"  [!] {model_name}: empty response (attempt {attempt + 1})")
+                    continue
+
+                result = self._parse_response(raw_text, model_name)
+                if result is not None:
+                    print(f"  [OK] Extracted via {model_name}")
+                    return result
+
+            except Exception as e:
+                error_str = str(e)
+
+                if "rate limit" in error_str.lower() or "429" in error_str:
+                    # Groq rate limit errors usually tell you exactly how long to wait
+                    retry_match = re.search(r"Please try again in ([\d\.]+)s", error_str)
+                    retry_secs = float(retry_match.group(1)) + 1 if retry_match else 10
+
+                    print(f"  [!] Groq ({model_name}) rate limited, waiting {retry_secs:.1f}s (attempt {attempt + 1})...")
+                    time.sleep(retry_secs)
+                    continue
+
+                print(f"  [!] {model_name} attempt {attempt + 1} failed for '{item_name}': {e}")
+                if attempt < config.LLM_MAX_RETRIES - 1:
+                    time.sleep(5 * (attempt + 1))
+
+        return None
 
