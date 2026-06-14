@@ -29,6 +29,10 @@ DATA_DIR.mkdir(exist_ok=True)
 SEED_JSON_PATH = DATA_DIR / "seed_mfp_list.json"
 ENRICHED_JSON_PATH = DATA_DIR / "enriched_mfp_data.json"
 ENRICHMENT_LOG_PATH = DATA_DIR / "enrichment_log.json"
+DEEP_ENRICHMENT_EVIDENCE_PATH = DATA_DIR / "deep_enrichment_evidence.json"
+MATERIAL_RELATIONSHIPS_PATH = DATA_DIR / "material_relationships.json"
+DEEP_RUNS_DIR = DATA_DIR / "deep_enrichment_runs"
+BACKUPS_DIR = DATA_DIR / "backups"
 
 # ── Serper API settings ─────────────────────────────────────────────────────
 SERPER_SEARCH_URL = "https://google.serper.dev/search"
@@ -61,6 +65,8 @@ SEARCH_DELAY_SECONDS = 1.5   # Delay between search API calls
 FETCH_DELAY_SECONDS = 1.0    # Delay between web page fetches
 LLM_DELAY_SECONDS = 4.0      # Delay between LLM calls (generous for free tier)
 FETCH_TIMEOUT_SECONDS = 10   # Timeout for fetching web pages
+DEEP_FETCH_MAX_CHARS = 6000
+DEEP_FETCH_MAX_DOCS = 6
 
 # ── Category mapping ────────────────────────────────────────────────────────
 CATEGORY_MAP = {
