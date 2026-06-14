@@ -19,6 +19,7 @@ load_dotenv(_env_path)
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 
 # ── File paths ──────────────────────────────────────────────────────────────
 CSV_PATH = PROJECT_ROOT / "MFP_List_87_Items_Split.csv"
@@ -44,6 +45,11 @@ GEMINI_MODELS = [
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+]
+
+TOGETHER_MODELS = [
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
 ]
 
 GEMINI_MODEL = GEMINI_MODELS[0]  # Primary model
