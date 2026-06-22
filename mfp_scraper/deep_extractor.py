@@ -32,14 +32,14 @@ Task:
 Extract ONLY these fields from the source dossier below:
 1. availability.band: one of unknown, low, medium, high
 2. availability.quantity_records: numeric collection / procurement / production / yield records only
-3. geography.districts: Indian districts explicitly mentioned
-4. geography.clusters: explicit named livelihood / Van Dhan / processing / tribal clusters
+3. geography.districts: Specific Indian districts where the material is found, collected, or produced
+4. geography.clusters: Named livelihood, processing, tribal, or Van Dhan clusters
 
 Rules:
 - Do not infer exact numeric values if the source does not state them.
 - Prefer official, institutional, biodiversity, and research sources.
-- Do not include states in the districts list.
-- Keep districts and clusters conservative.
+- Do not include whole states in the districts list (e.g. do not put "Odisha", put the district like "Koraput").
+- Extract any districts and clusters reasonably supported by the text.
 - Return evidence entries for every non-empty field you populate.
 - Use only source URLs that already appear in the dossier.
 
@@ -210,10 +210,13 @@ class DeepExtractor:
                     if "429" in error_str or "rate limit" in error_str.lower():
                         retry_match = re.search(r"Please try again in ([\d\.]+)s", error_str)
                         retry_secs = float(retry_match.group(1)) + 1 if retry_match else 10
+                        print(f"      [!] Groq ({model_name}) rate limited, waiting {retry_secs:.1f}s...")
                         time.sleep(retry_secs)
                         continue
                     if attempt >= config.LLM_MAX_RETRIES - 1:
+                        print(f"      [!] Groq ({model_name}) attempt {attempt + 1} failed: {exc}")
                         break
+                    print(f"      [!] Groq ({model_name}) attempt {attempt + 1} failed, retrying...")
                     time.sleep(3 * (attempt + 1))
         return None
 
@@ -245,12 +248,16 @@ class DeepExtractor:
                     error_str = str(exc)
                     if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
                         if attempt >= config.LLM_MAX_RETRIES - 1:
+                            print(f"      [!] Gemini ({model_name}) exhausted.")
                             self.exhausted_models.add(model_name)
                             break
+                        print(f"      [!] Gemini ({model_name}) rate limited, waiting 8s...")
                         time.sleep(8)
                         continue
                     if attempt >= config.LLM_MAX_RETRIES - 1:
+                        print(f"      [!] Gemini ({model_name}) attempt {attempt + 1} failed: {exc}")
                         break
+                    print(f"      [!] Gemini ({model_name}) attempt {attempt + 1} failed, retrying...")
                     time.sleep(3 * (attempt + 1))
         return None
 
