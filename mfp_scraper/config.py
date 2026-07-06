@@ -34,6 +34,14 @@ MATERIAL_RELATIONSHIPS_PATH = DATA_DIR / "material_relationships.json"
 DEEP_RUNS_DIR = DATA_DIR / "deep_enrichment_runs"
 BACKUPS_DIR = DATA_DIR / "backups"
 
+# Market Demand Module Output Paths
+MARKET_DEMAND_PATH = DATA_DIR / "market_demand_data.json"
+MARKET_PRODUCTS_PATH = DATA_DIR / "market_products.json"
+MARKET_ANALYSIS_LOG_PATH = DATA_DIR / "market_analysis_log.json"
+MARKET_SOURCES_PATH = DATA_DIR / "market_sources.json"
+MARKET_RUNS_DIR = DATA_DIR / "market_runs"
+MARKET_BACKUPS_DIR = DATA_DIR / "market_backups"
+
 # ── Serper API settings ─────────────────────────────────────────────────────
 SERPER_SEARCH_URL = "https://google.serper.dev/search"
 SERPER_IMAGES_URL = "https://google.serper.dev/images"
