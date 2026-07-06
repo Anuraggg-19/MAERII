@@ -102,6 +102,7 @@ class DeepEnrichmentPipeline:
 
         for filtered_index, item in enumerate(selected):
             actual_index = resume_from + filtered_index
+            print(f"\n  [{actual_index + 1}/{len(items)}] Deep enriching: {item['name']}...")
             try:
                 result = self.deep_enrich_item(item)
                 preview_results.append(result["preview"])
@@ -119,6 +120,16 @@ class DeepEnrichmentPipeline:
                     batch_results = []
                     manifest["last_committed_index"] = actual_index
                     write_manifest(self.run_id, manifest)
+                elif not self.apply_changes:
+                    # Continuously save preview data so it isn't lost if terminated early
+                    write_preview(self.run_id, {
+                        "run_id": self.run_id,
+                        "mode": manifest["mode"],
+                        "applied": False,
+                        "items": preview_results,
+                        "validation": "Partial run - validation not yet calculated",
+                    })
+
             except Exception as exc:
                 manifest["errors"].append({
                     "mfp_id": item["mfp_id"],
@@ -170,8 +181,11 @@ class DeepEnrichmentPipeline:
 
     def deep_enrich_item(self, item: dict) -> dict:
         """Build additive deep enrichment for a single existing enriched item."""
+        print("    - Searching for deep evidence...")
         search_results = self._collect_search_results(item)
+        print(f"    - Fetching {len(search_results)} documents...")
         documents = self._collect_documents(search_results)
+        print("    - Extracting insights via LLM...")
         extracted = self.extractor.extract(item, documents)
 
         evidence_records = self._build_evidence_records(item, extracted.get("evidence", []))
@@ -258,15 +272,9 @@ class DeepEnrichmentPipeline:
         """Build targeted search queries for deep enrichment."""
         name_query = f"{item['name']} {item.get('scientific_name') or ''}".strip()
         return {
-            "quantity": (
-                f"{name_query} India procurement production collection yield report pdf tribal forest produce"
-            ),
-            "geography": (
-                f"{name_query} district cluster Van Dhan tribal forest division India pdf"
-            ),
-            "relationships": (
-                f"{name_query} processing uses value addition cluster livelihood India tribal"
-            ),
+            "quantity": f'"{item["name"]}" India annual production OR collection OR yield tonnes',
+            "geography": f'"{item["name"]}" major producing districts India',
+            "relationships": f'"{item["name"]}" tribal value addition processing products',
         }
 
     def _collect_search_results(self, item: dict) -> list[dict]:
