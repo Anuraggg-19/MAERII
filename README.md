@@ -58,6 +58,28 @@ python -m mfp_scraper.main --validate
 python -m mfp_scraper.main --export csv
 ```
 
+## Module 2: Market Demand Intelligence
+
+Extracts market signals and classifications from e-commerce for enriched MFPs.
+*Note: Requires `SERPER_API_KEY` for Google Shopping search.*
+
+```bash
+# Test on a single item (Preview mode)
+python -m mfp_scraper.market_scraper --item "Wild Honey" --preview
+
+# Run batch for first 5 items (Preview mode)
+python -m mfp_scraper.market_scraper --all --preview --limit 5
+
+# Full apply run on all items
+python -m mfp_scraper.market_scraper --all --apply
+
+# Validate outputs
+python -m mfp_scraper.market_scraper --validate
+
+# Export market data
+python -m mfp_scraper.market_scraper --export csv
+```
+
 ## Project Structure
 
 ```
@@ -70,7 +92,16 @@ mfp_scraper/
 ├── llm_extractor.py         # Gemini LLM structured extraction
 ├── enrichment_pipeline.py   # Full pipeline orchestrator
 ├── validator.py             # Data quality validation
-└── main.py                  # CLI entry point
+├── main.py                  # CLI entry point
+│
+└── market_scraper/          # MODULE 2: Market Intelligence
+    ├── config_market.py     
+    ├── ecommerce_client.py  
+    ├── market_extractor.py  
+    ├── market_models.py     
+    ├── market_pipeline.py   
+    ├── market_validator.py  
+    └── main_market.py       
 ```
 
 ## API Keys Required
