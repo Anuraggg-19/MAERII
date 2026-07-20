@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAERII Knowledge Engine</title>
+  <meta name="description" content="Raw Material Knowledge Engine for Minor Forest Produce — search, explore, and analyze tribal raw materials." />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<div class="app-layout">
+
+  <!-- ── Header ─────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="logo"><span>MAERII</span> Knowledge Engine</div>
+    <div class="subtitle">Raw Material Intelligence · 87 MFP Items</div>
+  </header>
+
+  <!-- ── Body ───────────────────────────────────────────── -->
+  <div class="app-body">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Materials</h3>
+        <input
+          type="text"
+          class="search-input"
+          id="searchInput"
+          placeholder="Search materials..."
+          autocomplete="off"
+        />
+      </div>
+      <div class="material-list" id="materialList">
+        <!-- Populated by JS -->
+      </div>
+      <div class="sidebar-footer" id="sidebarFooter">Loading...</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content" id="mainContent">
+      <!-- Empty state (shown initially) -->
+      <div class="empty-state" id="emptyState">
+        <div class="icon">🌿</div>
+        <h2>Select a Material</h2>
+        <p>Choose an item from the list to view its knowledge profile and market data.</p>
+      </div>
+
+      <!-- Detail view (hidden initially) -->
+      <div class="hidden" id="detailView">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
