@@ -21,7 +21,7 @@ from neo4j import GraphDatabase
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "Neo4j123")
 
 _driver: Optional[GraphDatabase.driver] = None
 
@@ -89,7 +89,16 @@ def get_material_detail(mfp_id: int) -> Optional[dict]:
            m.description     AS description,
            m.season          AS season,
            m.shelf_life      AS shelf_life,
-           m.availability_band AS availability_band
+           m.availability_band AS availability_band,
+           m.sustainability_score AS sustainability_score,
+           m.durability_rating    AS durability_rating,
+           m.estimated_lifespan   AS estimated_lifespan,
+           m.strength             AS strength,
+           m.flexibility          AS flexibility,
+           m.texture              AS texture,
+           m.water_resistance     AS water_resistance,
+           m.biodegradability     AS biodegradability,
+           m.workability          AS workability
     """
 
     # 2. Graph neighbors — one query per relationship type
