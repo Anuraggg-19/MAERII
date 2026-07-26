@@ -139,32 +139,59 @@ def analyze_market_realtime(mfp_id: int) -> dict:
             llm_analysis.get("demand_indicators", {}).get("key_demand_drivers", [])
         )
 
-    # 5. Build top products for display (limit to 10)
-    top_products = sorted(
+    # 5. Build display products
+    def _build_display(product_list):
+        """Convert internal product dicts to display-friendly dicts."""
+        result = []
+        for p in product_list:
+            price_per_gram = _calculate_per_gram_price(p)
+            result.append({
+                "title": p.get("title", ""),
+                "price": p.get("price"),
+                "price_per_gram": price_per_gram,
+                "rating": p.get("rating"),
+                "review_count": p.get("review_count", 0),
+                "seller": p.get("seller", ""),
+                "source": p.get("source", ""),
+                "url": p.get("url", ""),
+                "image_url": p.get("image_url", ""),
+                "product_type": p.get("product_type", "derived"),
+                "attributes": [
+                    a["name"] for a in p.get("attributes", [])
+                    if a.get("value") is True
+                ],
+                "confidence": p.get("confidence", 0),
+                "is_matched": mfp_id in p.get("matched_mfp_ids", []),
+            })
+        return result
+
+    # All scraped products (sorted by confidence then reviews)
+    all_sorted = sorted(
+        classified_products,
+        key=lambda p: (p.get("confidence", 0), p.get("review_count", 0)),
+        reverse=True,
+    )
+    all_display = _build_display(all_sorted)
+
+    # LLM matched only
+    matched_sorted = sorted(
         matched_products,
         key=lambda p: (p.get("confidence", 0), p.get("review_count", 0)),
         reverse=True,
-    )[:10]
-
-    display_products = []
-    for p in top_products:
-        display_products.append({
-            "title": p.get("title", ""),
-            "price": p.get("price"),
-            "rating": p.get("rating"),
-            "review_count": p.get("review_count", 0),
-            "seller": p.get("seller", ""),
-            "source": p.get("source", ""),
-            "url": p.get("url", ""),
-            "image_url": p.get("image_url", ""),
-            "attributes": [
-                a["name"] for a in p.get("attributes", [])
-                if a.get("value") is True
-            ],
-            "confidence": p.get("confidence", 0),
-        })
+    )
+    matched_display = _build_display(matched_sorted)
 
     elapsed = round(time.time() - start_time, 1)
+
+    # 6. Extract new analysis sections from LLM insights
+    seasonal_demand = None
+    product_demand_match = None
+    regional_market_fit = None
+
+    if llm_analysis:
+        seasonal_demand = llm_analysis.get("seasonal_demand")
+        product_demand_match = llm_analysis.get("product_demand_match")
+        regional_market_fit = llm_analysis.get("regional_market_fit")
 
     return {
         "status": "complete",
@@ -176,7 +203,63 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         "market_summary": summary,
         "competitor_analysis": competitor_analysis,
         "confidence": confidence,
-        "top_products": display_products,
+        "all_products": all_display,
+        "top_products": matched_display,
+        "seasonal_demand": seasonal_demand,
+        "product_demand_match": product_demand_match,
+        "regional_market_fit": regional_market_fit,
         "elapsed_seconds": elapsed,
         "provider": extractor.describe_provider(),
     }
+
+
+def _calculate_per_gram_price(product: dict) -> Optional[float]:
+    """Calculate price per gram from product price and packaging weight.
+
+    Parses packaging attribute (e.g. '500g', '1kg', '250ml') and divides
+    total price by weight in grams. Returns None if not calculable.
+    """
+    import re
+
+    price = product.get("price")
+    if not price or price <= 0:
+        return None
+
+    # Look for packaging in attributes
+    packaging = None
+    for attr in product.get("attributes", []):
+        if attr.get("name") == "packaging":
+            packaging = str(attr.get("value", ""))
+            break
+
+    # Also try extracting from title if no packaging attribute
+    if not packaging:
+        title = product.get("title", "").lower()
+        weight_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*(gm|gms|g|gram|grams|kg|kgs)",
+            title,
+        )
+        if weight_match:
+            packaging = weight_match.group(0)
+
+    if not packaging:
+        return None
+
+    # Parse weight to grams
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(gm|gms|g|gram|grams|kg|kgs)", packaging.lower())
+    if not match:
+        return None
+
+    value = float(match.group(1))
+    unit = match.group(2)
+
+    if unit in ("kg", "kgs"):
+        grams = value * 1000
+    else:
+        grams = value
+
+    if grams <= 0:
+        return None
+
+    return round(price / grams, 2)
+
