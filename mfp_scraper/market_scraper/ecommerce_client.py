@@ -99,7 +99,10 @@ class EcommerceClient:
     def build_search_queries(self, mfp_item: dict) -> list[str]:
         """Build targeted search queries for an MFP item.
 
-        Strategy: MFP Name + Top 2 Current Products + Top 2 Potential Products
+        Strategy: balanced mix of raw material + derived products
+        - 1 query for raw material
+        - 2 queries for current (derived) products
+        - 2 queries for potential (value-added) products
         All queries are India-targeted.
         """
         name = mfp_item.get("name", "")
@@ -108,15 +111,15 @@ class EcommerceClient:
 
         queries = []
 
-        # Primary: MFP name
-        queries.append(f"{name} India buy online")
+        # Raw material query
+        queries.append(f"raw {name} buy online India")
 
-        # Current products (top 2)
+        # Current products (derived — top 2)
         for product in current:
             query = f"{product} {name} India"
             queries.append(query)
 
-        # Potential products (top 2)
+        # Potential products (value-added — top 2)
         for product in potential:
             query = f"{product} India buy"
             queries.append(query)
