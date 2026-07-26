@@ -5,55 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MAERII Knowledge Engine</title>
   <meta name="description" content="Raw Material Knowledge Engine for Minor Forest Produce — search, explore, and analyze tribal raw materials." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 
-<div class="app-layout">
+<div class="app-container">
 
-  <!-- ── Header ─────────────────────────────────────────── -->
-  <header class="app-header">
-    <div class="logo"><span>MAERII</span> Knowledge Engine</div>
-    <div class="subtitle">Raw Material Intelligence · 87 MFP Items</div>
-  </header>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>MAERII</h1>
+      <div class="subtitle">Knowledge Engine · 87 MFP Items</div>
+    </div>
+    <div class="search-container">
+      <input
+        type="text"
+        class="search-input"
+        id="searchInput"
+        placeholder="Search materials..."
+        autocomplete="off"
+      />
+    </div>
+    <div class="material-list" id="materialList">
+      <!-- Populated by JS -->
+    </div>
+    <div class="sidebar-footer" id="sidebarFooter">Loading...</div>
+  </aside>
 
-  <!-- ── Body ───────────────────────────────────────────── -->
-  <div class="app-body">
+  <!-- Main -->
+  <main class="main-content" id="mainContent">
+    <!-- Empty state (shown initially) -->
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🌿</div>
+      <h2>Select a Material</h2>
+      <p>Choose an item from the list to view its knowledge profile and market data.</p>
+    </div>
 
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <h3>Materials</h3>
-        <input
-          type="text"
-          class="search-input"
-          id="searchInput"
-          placeholder="Search materials..."
-          autocomplete="off"
-        />
-      </div>
-      <div class="material-list" id="materialList">
-        <!-- Populated by JS -->
-      </div>
-      <div class="sidebar-footer" id="sidebarFooter">Loading...</div>
-    </aside>
+    <!-- Detail view (hidden initially) -->
+    <div class="hidden" id="detailView">
+      <!-- Populated by JS -->
+    </div>
+  </main>
 
-    <!-- Main -->
-    <main class="main-content" id="mainContent">
-      <!-- Empty state (shown initially) -->
-      <div class="empty-state" id="emptyState">
-        <div class="icon">🌿</div>
-        <h2>Select a Material</h2>
-        <p>Choose an item from the list to view its knowledge profile and market data.</p>
-      </div>
-
-      <!-- Detail view (hidden initially) -->
-      <div class="hidden" id="detailView">
-        <!-- Populated by JS -->
-      </div>
-    </main>
-
-  </div>
 </div>
 
 <script src="/static/app.js"></script>
