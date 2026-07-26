@@ -64,6 +64,87 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with these f
 }}
 """
 
+MATERIAL_SCORES_PROMPT = """You are an expert in Indian Minor Forest Produce (MFP) analyzing material properties.
+
+Material:
+- Name: {item_name}
+- Scientific name: {scientific_name}
+- Category: {category}
+- Current products: {current_products}
+- Description: {description}
+
+Analyze this SPECIFIC material and return a JSON with three sections.
+
+SECTION 1 — Material Properties:
+Consider what products can actually be made from this material. Be precise:
+- strength: how structurally strong is the raw material? (seeds/powders = low, wood/bamboo = high, fibers = medium)
+- flexibility: can it bend without breaking? (resins/seeds = low, leaves/fibers = high, gums = medium)
+- texture: the dominant surface feel of the raw material
+- water_resistance: does it resist moisture? (leaves/flowers = low, resins/lac = high, seeds = medium)
+- biodegradability: how fast does it decompose? (leaves/flowers = high and fast, resins/lac = low and slow, seeds = medium)
+- workability: how easy is it to process into products? (powders/gums = easy, hard seeds = difficult, leaves = moderate)
+
+SECTION 2 — Sustainability Score:
+CRITICAL: Do NOT give every material the same score. Use this rubric:
+
+0.90-1.0: Fast-regenerating, abundant, zero-harm harvesting (e.g., fallen leaves, shed bark)
+0.75-0.89: Renewable but needs moderate management (e.g., tree-borne seeds with annual cycles)
+0.60-0.74: Renewable but harvesting can stress the source (e.g., gum tapping, resin extraction that wounds trees)
+0.45-0.59: Slow-regenerating or harvesting has ecological side effects (e.g., wild honey disturbs bee colonies)
+0.30-0.44: Overharvested or threatened species, or significant processing pollution
+0.15-0.29: Critically threatened or highly destructive harvesting
+
+Consider these differentiating factors:
+- Does harvesting DAMAGE or KILL the source organism? (tapping gum wounds trees → lower score)
+- Is the material from a FALLEN/SHED part or must it be actively extracted?
+- How FAST does the source regenerate? (annual seeds vs. slow-growing trees)
+- Is the species THREATENED or overharvested in any region?
+- Does PROCESSING require chemicals or energy? (lac processing needs heat → lower)
+- Is the material CULTIVATED or purely wild-collected?
+
+SECTION 3 — Durability Analysis:
+How long do FINISHED PRODUCTS made from this material typically last?
+- Perishable food products (honey, dried fruits) → lifespan is shelf life
+- Non-food products (lac crafts, bamboo items) → lifespan is product durability
+- Seeds used for oil extraction → lifespan refers to the oil's shelf life
+
+Respond with valid JSON only:
+{{
+  "material_properties": {{
+    "strength": "low|medium|high",
+    "flexibility": "low|medium|high",
+    "texture": "smooth|coarse|fibrous|granular|waxy|powdery|resinous",
+    "water_resistance": "low|medium|high",
+    "biodegradability": "low|medium|high",
+    "workability": "easy|moderate|difficult"
+  }},
+  "sustainability_score": {{
+    "overall": 0.0,
+    "renewability": "low|medium|high",
+    "biodegradability": "low|medium|high",
+    "harvesting_impact": "low|medium|high",
+    "reasoning": "1-2 sentence explanation of why this specific score"
+  }},
+  "durability_analysis": {{
+    "lifespan_rating": "low|medium|high",
+    "estimated_lifespan": "< 6 months|6-12 months|1-2 years|3-5 years|5+ years",
+    "factors": ["factor1", "factor2"]
+  }},
+  "confidence": {{
+    "material_properties": 0.0,
+    "sustainability_score": 0.0,
+    "durability_analysis": 0.0
+  }}
+}}
+
+IMPORTANT RULES:
+- Each material MUST get a DIFFERENT sustainability score. No two materials are equally sustainable.
+- The overall score must reflect the specific harvesting method and ecological impact of THIS material.
+- Do NOT default to 0.85 or any other generic value.
+- Return ONLY valid JSON, no explanation outside the JSON.
+"""
+
+
 
 class GeminiExtractor:
     """Uses Google Gemini (google.genai SDK) to extract structured data from text."""
@@ -247,6 +328,58 @@ class GeminiExtractor:
 
         return data
 
+    def extract_material_scores(self, item: dict) -> Optional[dict]:
+        """Extract material properties, sustainability, and durability scores via LLM.
+
+        Does NOT require source text — uses the LLM's own knowledge of the material.
+        """
+        prompt = MATERIAL_SCORES_PROMPT.format(
+            item_name=item["name"],
+            scientific_name=item.get("scientific_name") or "Unknown",
+            category=item.get("category", "Unknown"),
+            current_products=", ".join(item.get("current_products", [])[:8]) or "None listed",
+            description=item.get("description") or "No description available",
+        )
+
+        for model_name in config.GEMINI_MODELS:
+            if model_name in self.exhausted_models:
+                continue
+            result = self._try_model(model_name, prompt, item["name"])
+            if result is not None:
+                return self._validate_scores(result)
+
+        print(f"  [FAIL] All models exhausted for scores of '{item['name']}'")
+        return None
+
+    def _validate_scores(self, data: dict) -> dict:
+        """Validate the material scores structure."""
+        # Ensure sub-dicts exist
+        if "material_properties" not in data or not isinstance(data["material_properties"], dict):
+            data["material_properties"] = {
+                "strength": "medium", "flexibility": "medium", "texture": "coarse",
+                "water_resistance": "low", "biodegradability": "high", "workability": "moderate",
+            }
+        if "sustainability_score" not in data or not isinstance(data["sustainability_score"], dict):
+            data["sustainability_score"] = {
+                "overall": 0.5, "renewability": "medium",
+                "biodegradability": "medium", "harvesting_impact": "medium",
+            }
+        else:
+            # Ensure overall is a float
+            try:
+                data["sustainability_score"]["overall"] = float(data["sustainability_score"].get("overall", 0.5))
+            except (ValueError, TypeError):
+                data["sustainability_score"]["overall"] = 0.5
+
+        if "durability_analysis" not in data or not isinstance(data["durability_analysis"], dict):
+            data["durability_analysis"] = {
+                "lifespan_rating": "medium", "estimated_lifespan": "1-2 years", "factors": [],
+            }
+        if "factors" not in data["durability_analysis"] or not isinstance(data["durability_analysis"]["factors"], list):
+            data["durability_analysis"]["factors"] = []
+
+        return data
+
 
 class GroqExtractor(GeminiExtractor):
     """Uses Groq to extract structured data from text. Inherits parsing logic from GeminiExtractor."""
@@ -332,5 +465,25 @@ class GroqExtractor(GeminiExtractor):
                 if attempt < config.LLM_MAX_RETRIES - 1:
                     time.sleep(5 * (attempt + 1))
 
+        return None
+
+    def extract_material_scores(self, item: dict) -> Optional[dict]:
+        """Override: use GROQ_MODELS for material score extraction."""
+        prompt = MATERIAL_SCORES_PROMPT.format(
+            item_name=item["name"],
+            scientific_name=item.get("scientific_name") or "Unknown",
+            category=item.get("category", "Unknown"),
+            current_products=", ".join(item.get("current_products", [])[:8]) or "None listed",
+            description=item.get("description") or "No description available",
+        )
+
+        for model_name in config.GROQ_MODELS:
+            if model_name in self.exhausted_models:
+                continue
+            result = self._try_model(model_name, prompt, item["name"])
+            if result is not None:
+                return self._validate_scores(result)
+
+        print(f"  [FAIL] All Groq models exhausted for scores of '{item['name']}'")
         return None
 
