@@ -32,7 +32,10 @@ MARKET_CLASSIFICATION_PROMPT = """You are classifying e-commerce products into I
 Available MFP Categories:
 {mfp_categories}
 
-Task: For EACH product below, determine which MFP category it matches (if any).
+Task: For EACH product below, determine which MFP category it matches (if any),
+and classify it as "raw" or "derived".
+- "raw" = the material sold in unprocessed/minimally-processed form (e.g., "Raw Bamboo Sticks 5kg", "Natural Honey 1kg")
+- "derived" = a value-added product made FROM the material (e.g., "Bamboo Lamp Shade", "Honey Face Wash")
 
 Products to classify:
 {products_text}
@@ -44,6 +47,7 @@ Respond with valid JSON only:
       "product_index": 0,
       "matched_mfp_ids": [2],
       "match_confidence": 0.9,
+      "product_type": "raw",
       "matching_attributes": ["raw", "forest", "pure"],
       "reasoning": "Product is raw forest honey matching MFP #2 Wild Honey"
     }}
@@ -56,6 +60,7 @@ Rules:
 - A product can match multiple MFP IDs if it uses multiple raw materials
 - If a product does not match any MFP, set matched_mfp_ids to empty list
 - Be conservative — only match when confident
+- product_type MUST be either "raw" or "derived" for every classification
 """
 
 MARKET_ANALYSIS_PROMPT = """You are analyzing the e-commerce market for an Indian Minor Forest Produce (MFP) item.
@@ -65,6 +70,7 @@ Category: {mfp_category}
 Current Products: {current_products}
 Potential Products: {potential_products}
 Minimum Support Price (MSP): ₹{msp} per {unit}
+Harvesting Season: {season}
 
 Market Data (scraped from e-commerce platforms):
 {market_data_text}
@@ -81,10 +87,29 @@ Analyze this market data and respond with valid JSON only:
     "key_demand_drivers": ["driver1", "driver2"],
     "seasonal_patterns": "description of seasonality if apparent"
   }},
-  "opportunities": ["opportunity 1", "opportunity 2"]
+  "opportunities": ["opportunity 1", "opportunity 2"],
+  "seasonal_demand": {{
+    "peak_seasons": ["Diwali", "Christmas"],
+    "seasonal_pattern": "Short description of demand seasonality",
+    "off_season_strategy": "Suggestion for off-season revenue"
+  }},
+  "product_demand_match": {{
+    "validated_products": ["products from Current/Potential list that have confirmed market demand"],
+    "unvalidated_products": ["products from Current/Potential list with no market evidence"],
+    "demand_alignment_score": 0.75
+  }},
+  "regional_market_fit": [
+    {{"region": "Mumbai", "fit": "premium décor", "confidence": 0.8}},
+    {{"region": "Bengaluru", "fit": "sustainable workspace items", "confidence": 0.7}},
+    {{"region": "Europe", "fit": "handcrafted eco luxury", "confidence": 0.6}}
+  ]
 }}
 
-Be concise and specific to the Indian market context.
+Rules:
+- Be concise and specific to the Indian market context.
+- For seasonal_demand, consider Indian festivals (Diwali, Holi, Navratri, Pongal, Christmas) and seasonal cycles.
+- For product_demand_match, cross-reference the Current/Potential products lists against what you see in the market data.
+- For regional_market_fit, suggest 3-5 regions (Indian cities or export markets) with product-market fit.
 """
 
 
@@ -144,6 +169,7 @@ class MarketExtractor:
                             "matching_attributes", []
                         )
                         products[idx]["llm_reasoning"] = classification.get("reasoning", "")
+                        products[idx]["product_type"] = classification.get("product_type", "derived")
 
         return products
 
@@ -166,6 +192,7 @@ class MarketExtractor:
             potential_products=", ".join(mfp_item.get("potential_products", [])),
             msp=mfp_item.get("msp", 0),
             unit=mfp_item.get("unit", "kg"),
+            season=mfp_item.get("season", "Year-round"),
             market_data_text=market_text,
         )
 
