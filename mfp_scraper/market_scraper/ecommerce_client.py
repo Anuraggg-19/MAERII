@@ -71,6 +71,7 @@ class EcommerceClient:
         queries = self.build_search_queries(mfp_item)
         all_products = []
         seen_ids = set()
+        seen_titles = set()
         query_log = []
 
         for query in queries:
@@ -78,8 +79,13 @@ class EcommerceClient:
             new_count = 0
             for product in products:
                 pid = product.get("product_id", "")
-                if pid and pid not in seen_ids:
+                title = product.get("title", "").strip().lower()
+                
+                # Deduplicate by ID and strict Title match
+                if pid and pid not in seen_ids and title not in seen_titles:
                     seen_ids.add(pid)
+                    if title:
+                        seen_titles.add(title)
                     all_products.append(product)
                     new_count += 1
 
@@ -96,32 +102,81 @@ class EcommerceClient:
             "products": all_products,
         }
 
+    @staticmethod
+    def _get_search_name(raw_name: str) -> str:
+        """Extract a short, search-friendly name from an MFP name.
+
+        Many MFP names have multiple forms separated by / or in parentheses.
+        For search, we want the shortest recognizable term.
+
+        Examples:
+          'Forest Cinnamon (Dalchini)' -> 'Dalchini'
+          'Pipla/Uchithi (Dried berry)' -> 'Pipla'
+          'Palash / Flame of the Forest' -> 'Palash'
+          'Cane (Rattan)' -> 'Rattan Cane'
+          'Wild Honey' -> 'Wild Honey'
+        """
+        import re
+        name = raw_name.strip()
+
+        # Extract parenthesized term — often the local/common name
+        paren_match = re.search(r'\(([^)]+)\)', name)
+        base_name = re.sub(r'\s*\([^)]*\)', '', name).strip()
+
+        # If there's a slash, take the first part (usually shorter/common)
+        if '/' in base_name:
+            parts = [p.strip() for p in base_name.split('/')]
+            base_name = min(parts, key=len) if parts else base_name
+
+        # If we found a parenthesized term, prefer it if it's a single
+        # recognizable word (like "Dalchini", "Rattan")
+        if paren_match:
+            paren_term = paren_match.group(1).strip()
+            # Skip descriptive parentheticals like "Dried berry", "Reeling/Un-Reeling"
+            if len(paren_term.split()) <= 2 and '/' not in paren_term:
+                # Use both for better coverage: "Rattan Cane", "Dalchini"
+                if len(base_name.split()) > 2:
+                    return paren_term  # Just "Dalchini" is better than "Forest Cinnamon"
+                return f"{paren_term} {base_name}"  # "Rattan Cane"
+
+        return base_name
+
+    @staticmethod
+    def _sanitize_query(query: str) -> str:
+        """Remove characters that break Serper API calls."""
+        import re
+        cleaned = re.sub(r'[()[\]{}/\\"]', ' ', query)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+
     def build_search_queries(self, mfp_item: dict) -> list[str]:
         """Build targeted search queries for an MFP item.
 
-        Strategy: balanced mix of raw material + derived products
+        Strategy: simple, short queries that maximize result volume.
+        All irrelevant/junk filtering is handled by the LLM classification
+        layer downstream — NOT by restricting search queries.
+
         - 1 query for raw material
-        - 2 queries for current (derived) products
+        - 3 queries for current (derived) products
         - 2 queries for potential (value-added) products
-        All queries are India-targeted.
         """
-        name = mfp_item.get("name", "")
-        current = mfp_item.get("current_products", [])[:2]
+        name = self._get_search_name(mfp_item.get("name", ""))
+        current = mfp_item.get("current_products", [])[:3]
         potential = mfp_item.get("potential_products", [])[:2]
 
         queries = []
 
-        # Raw material query
-        queries.append(f"raw {name} buy online India")
+        # Raw material query — simple and broad
+        queries.append(self._sanitize_query(f"{name} buy online India"))
 
-        # Current products (derived — top 2)
+        # Current products (derived — top 3)
         for product in current:
-            query = f"{product} {name} India"
+            query = self._sanitize_query(f"{product} {name} India")
             queries.append(query)
 
         # Potential products (value-added — top 2)
         for product in potential:
-            query = f"{product} India buy"
+            query = self._sanitize_query(f"{product} {name} India")
             queries.append(query)
 
         # Deduplicate and cap
