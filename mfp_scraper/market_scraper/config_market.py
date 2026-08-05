@@ -38,8 +38,8 @@ SERPER_SEARCH_URL = config.SERPER_SEARCH_URL
 # ── Search configuration ───────────────────────────────────────────────────
 # Per MFP: search MFP name + top 2 current_products + top 2 potential_products
 # = up to 5 queries per MFP item
-MAX_SEARCH_QUERIES_PER_MFP = 5
-SHOPPING_RESULTS_PER_QUERY = 10
+MAX_SEARCH_QUERIES_PER_MFP = 6
+SHOPPING_RESULTS_PER_QUERY = 20
 WEB_RESULTS_PER_QUERY = 5
 
 # ── Rate limiting ──────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ FETCH_TIMEOUT_SECONDS = 15          # Timeout for HTTP requests
 
 # ── Product caps ───────────────────────────────────────────────────────────
 MAX_PRODUCTS_PER_MFP = 50           # Cap on products to store per MFP item
-MAX_PRODUCTS_FOR_LLM = 20           # Max products to send to LLM for analysis
+MAX_PRODUCTS_FOR_LLM = 40           # Max products to send to LLM for analysis
 
 # ── Market analysis constants ──────────────────────────────────────────────
 DEMAND_SCORE_WEIGHTS = {
