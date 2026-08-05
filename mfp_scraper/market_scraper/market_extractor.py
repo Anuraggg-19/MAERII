@@ -33,9 +33,10 @@ Available MFP Categories:
 {mfp_categories}
 
 Task: For EACH product below, determine which MFP category it matches (if any),
-and classify it as "raw" or "derived".
+and classify it as "raw", "derived", or "invalid".
 - "raw" = the material sold in unprocessed/minimally-processed form (e.g., "Raw Bamboo Sticks 5kg", "Natural Honey 1kg")
 - "derived" = a value-added product made FROM the material (e.g., "Bamboo Lamp Shade", "Honey Face Wash")
+- "invalid" = the product has NO genuine connection to any MFP category (see rules below)
 
 Products to classify:
 {products_text}
@@ -60,7 +61,15 @@ Rules:
 - A product can match multiple MFP IDs if it uses multiple raw materials
 - If a product does not match any MFP, set matched_mfp_ids to empty list
 - Be conservative — only match when confident
-- product_type MUST be either "raw" or "derived" for every classification
+- product_type MUST be "raw", "derived", or "invalid" for every classification
+
+CRITICAL — classify as "invalid" if the product is ANY of the following:
+1. Books, textbooks, e-books, PDFs, journals, research papers, or educational material
+2. Completely unrelated items that appeared due to keyword overlap (e.g., "A4 Copier Paper" for a bamboo query, "Phone Case" for a neem query)
+3. Heavy industrial machinery or lab equipment (unless the MFP specifically involves processing equipment)
+4. Software, apps, or digital services
+5. Generic office/stationery supplies with no real MFP connection
+If classified as "invalid", set matched_mfp_ids to an empty list and match_confidence to 0.0.
 """
 
 MARKET_ANALYSIS_PROMPT = """You are analyzing the e-commerce market for an Indian Minor Forest Produce (MFP) item.
@@ -158,6 +167,16 @@ class MarketExtractor:
             for classification in llm_results:
                 idx = classification.get("product_index", -1)
                 if 0 <= idx < len(products):
+                    product_type = classification.get("product_type", "derived")
+
+                    # Reject invalid products entirely
+                    if product_type == "invalid":
+                        products[idx]["product_type"] = "invalid"
+                        products[idx]["matched_mfp_ids"] = []
+                        products[idx]["confidence"] = 0.0
+                        products[idx]["llm_reasoning"] = classification.get("reasoning", "Classified as invalid")
+                        continue
+
                     matched_ids = classification.get("matched_mfp_ids", [])
                     conf = float(classification.get("match_confidence", 0.0))
                     if matched_ids:
@@ -169,7 +188,10 @@ class MarketExtractor:
                             "matching_attributes", []
                         )
                         products[idx]["llm_reasoning"] = classification.get("reasoning", "")
-                        products[idx]["product_type"] = classification.get("product_type", "derived")
+                        products[idx]["product_type"] = product_type
+
+        # Remove invalid products completely — they should never appear in the UI
+        products = [p for p in products if p.get("product_type") != "invalid"]
 
         return products
 
