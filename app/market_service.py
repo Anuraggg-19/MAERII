@@ -108,6 +108,12 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         raw_products, all_mfp_items, target_mfp_id=mfp_id
     )
 
+    # Strip any invalid products so they never reach the UI
+    classified_products = [
+        p for p in classified_products
+        if p.get("product_type") != "invalid"
+    ]
+
     matched_products = [
         p for p in classified_products
         if mfp_id in p.get("matched_mfp_ids", [])
