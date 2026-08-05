@@ -326,13 +326,21 @@ def calculate_trend(products: list[dict]) -> str:
 # ── Market summary builders ────────────────────────────────────────────────
 
 def build_market_summary(products: list[dict]) -> dict:
-    """Aggregate product list into market summary statistics."""
+    """Aggregate product list into market summary statistics.
+
+    Uses IQR (Interquartile Range) filtering to exclude extreme price
+    outliers before computing averages, so a single ₹50,000 item
+    doesn't skew the market analysis.
+    """
     if not products:
         return make_default_market_analysis()["market_summary"]
 
-    prices = [p["price"] for p in products if p.get("price") and p["price"] > 0]
+    raw_prices = [p["price"] for p in products if p.get("price") and p["price"] > 0]
     ratings = [p["rating"] for p in products if p.get("rating") and p["rating"] > 0]
     total_reviews = sum(p.get("review_count", 0) for p in products)
+
+    # ── IQR price outlier removal ──────────────────────────────────────
+    prices = _filter_price_outliers(raw_prices)
 
     # Top attributes
     attr_counts: dict[str, int] = {}
@@ -355,7 +363,32 @@ def build_market_summary(products: list[dict]) -> dict:
         "demand_score": 0.0,  # Set by pipeline
         "trend": "stable",     # Set by pipeline
         "top_attributes": top_attributes,
+        "outliers_removed": len(raw_prices) - len(prices),
     }
+
+
+def _filter_price_outliers(prices: list[float]) -> list[float]:
+    """Remove extreme price outliers using IQR (Interquartile Range).
+
+    Drops values below Q1 - 1.5*IQR and above Q3 + 1.5*IQR.
+    Falls back to the original list if too few data points (<4).
+    """
+    if len(prices) < 4:
+        return prices
+
+    sorted_p = sorted(prices)
+    n = len(sorted_p)
+    q1 = sorted_p[n // 4]
+    q3 = sorted_p[(3 * n) // 4]
+    iqr = q3 - q1
+
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+
+    filtered = [p for p in prices if lower_bound <= p <= upper_bound]
+
+    # Safety: never remove ALL prices — keep at least the original if filter is too aggressive
+    return filtered if filtered else prices
 
 
 def build_competitor_analysis(products: list[dict]) -> dict:
