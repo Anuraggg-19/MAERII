@@ -30,9 +30,35 @@ const detailViewEl = document.getElementById("detailView");
 // ── Init ───────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
   loadMaterials();
   searchInputEl.addEventListener("input", filterMaterials);
 });
+
+// ── Theme Toggle ───────────────────────────────────────────────────────────
+
+function initTheme() {
+  const saved = localStorage.getItem("maerii-theme") || "dark";
+  applyTheme(saved);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme");
+  const next = current === "light" ? "dark" : "light";
+  applyTheme(next);
+  localStorage.setItem("maerii-theme", next);
+}
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  // Update button icon
+  const btn = document.getElementById("themeToggle");
+  if (btn) btn.textContent = theme === "light" ? "🌙" : "☀️";
+}
 
 // ── API helpers ─────────────────────────────────────────────────────────────
 
