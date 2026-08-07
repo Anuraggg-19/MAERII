@@ -32,6 +32,9 @@ MARKET_CLASSIFICATION_PROMPT = """You are classifying e-commerce products into I
 Available MFP Categories:
 {mfp_categories}
 
+Target MFP context:
+{target_mfp_context}
+
 Task: For EACH product below, determine which MFP category it matches (if any),
 and classify it as "raw", "derived", or "invalid".
 - "raw" = the material sold in unprocessed/minimally-processed form (e.g., "Raw Bamboo Sticks 5kg", "Natural Honey 1kg")
@@ -61,6 +64,8 @@ Rules:
 - A product can match multiple MFP IDs if it uses multiple raw materials
 - If a product does not match any MFP, set matched_mfp_ids to empty list
 - Be conservative — only match when confident
+- The target context lists known product forms and search aliases. It helps
+  identify legitimate target products, but never overrides the invalid rules.
 - product_type MUST be "raw", "derived", or "invalid" for every classification
 
 CRITICAL — classify as "invalid" if the product is ANY of the following:
@@ -143,6 +148,8 @@ class MarketExtractor:
         products: list[dict],
         mfp_items: list[dict],
         target_mfp_id: int,
+        target_category_context: Optional[list[dict]] = None,
+        classify_all_batches: bool = False,
     ) -> list[dict]:
         """Classify scraped products against MFP categories via LLM.
 
@@ -158,37 +165,55 @@ class MarketExtractor:
         if not self.provider:
             return products
 
-        # Batch classify via LLM (limit to avoid huge prompts)
-        batch = products[: config_market.MAX_PRODUCTS_FOR_LLM]
-        llm_results = self._llm_classify(batch, mfp_items)
+        # The live endpoint opts into classifying every retained result so late
+        # category-specific products are not absent from the matched-only view.
+        # Other callers retain the existing single-batch behaviour by default.
+        batch_size = config_market.MAX_PRODUCTS_FOR_LLM
+        classification_limit = len(products) if classify_all_batches else min(len(products), batch_size)
+        for batch_start in range(0, classification_limit, batch_size):
+            batch = products[batch_start: batch_start + batch_size]
+            llm_results = self._llm_classify(
+                batch,
+                mfp_items,
+                target_mfp_id=target_mfp_id,
+                target_category_context=target_category_context,
+            )
 
-        if llm_results:
-            # Merge LLM results into products
+            if not llm_results:
+                continue
+
+            # LLM product indices are local to this batch; offset them before
+            # applying classifications to the original product list.
             for classification in llm_results:
-                idx = classification.get("product_index", -1)
-                if 0 <= idx < len(products):
-                    product_type = classification.get("product_type", "derived")
+                local_index = classification.get("product_index", -1)
+                if not isinstance(local_index, int):
+                    continue
+                index = batch_start + local_index
+                if not 0 <= index < len(products):
+                    continue
 
-                    # Reject invalid products entirely
-                    if product_type == "invalid":
-                        products[idx]["product_type"] = "invalid"
-                        products[idx]["matched_mfp_ids"] = []
-                        products[idx]["confidence"] = 0.0
-                        products[idx]["llm_reasoning"] = classification.get("reasoning", "Classified as invalid")
-                        continue
+                product_type = classification.get("product_type", "derived")
 
-                    matched_ids = classification.get("matched_mfp_ids", [])
-                    conf = float(classification.get("match_confidence", 0.0))
-                    if matched_ids:
-                        products[idx]["matched_mfp_ids"] = matched_ids
-                        products[idx]["confidence"] = round(max(
-                            products[idx].get("confidence", 0.0), conf
-                        ), 3)
-                        products[idx]["matching_attributes"] = classification.get(
-                            "matching_attributes", []
-                        )
-                        products[idx]["llm_reasoning"] = classification.get("reasoning", "")
-                        products[idx]["product_type"] = product_type
+                # Reject invalid products entirely
+                if product_type == "invalid":
+                    products[index]["product_type"] = "invalid"
+                    products[index]["matched_mfp_ids"] = []
+                    products[index]["confidence"] = 0.0
+                    products[index]["llm_reasoning"] = classification.get("reasoning", "Classified as invalid")
+                    continue
+
+                matched_ids = classification.get("matched_mfp_ids", [])
+                conf = float(classification.get("match_confidence", 0.0))
+                if matched_ids:
+                    products[index]["matched_mfp_ids"] = matched_ids
+                    products[index]["confidence"] = round(max(
+                        products[index].get("confidence", 0.0), conf
+                    ), 3)
+                    products[index]["matching_attributes"] = classification.get(
+                        "matching_attributes", []
+                    )
+                    products[index]["llm_reasoning"] = classification.get("reasoning", "")
+                    products[index]["product_type"] = product_type
 
         # Remove invalid products completely — they should never appear in the UI
         products = [p for p in products if p.get("product_type") != "invalid"]
@@ -255,7 +280,13 @@ class MarketExtractor:
 
     # ── LLM classification ──────────────────────────────────────────────────
 
-    def _llm_classify(self, products: list[dict], mfp_items: list[dict]) -> Optional[list[dict]]:
+    def _llm_classify(
+        self,
+        products: list[dict],
+        mfp_items: list[dict],
+        target_mfp_id: int,
+        target_category_context: Optional[list[dict]] = None,
+    ) -> Optional[list[dict]]:
         """Batch classify products via LLM."""
         # Build MFP category list for prompt
         mfp_categories = "\n".join(
@@ -270,8 +301,33 @@ class MarketExtractor:
             for i, p in enumerate(products)
         )
 
+        if target_category_context is None:
+            target_mfp_context = "No additional target-specific vocabulary supplied."
+        else:
+            target_item = next(
+                (item for item in mfp_items if item.get("mfp_id") == target_mfp_id),
+                None,
+            )
+            target_products: list[str] = []
+            if target_item:
+                target_products.extend(target_item.get("current_products", []))
+                target_products.extend(target_item.get("potential_products", []))
+            for category in target_category_context:
+                if not isinstance(category, dict):
+                    continue
+                for product in category.get("products", []):
+                    product_name = product.get("name", "") if isinstance(product, dict) else str(product)
+                    if product_name:
+                        target_products.append(product_name)
+
+            target_mfp_context = (
+                f"Target MFP ID {target_mfp_id}: {target_item.get('name', '') if target_item else ''}\n"
+                f"Known target product forms: {', '.join(dedupe_strings(target_products)) or 'None listed'}"
+            )
+
         prompt = MARKET_CLASSIFICATION_PROMPT.format(
             mfp_categories=mfp_categories,
+            target_mfp_context=target_mfp_context,
             products_text=products_text,
         )
 
