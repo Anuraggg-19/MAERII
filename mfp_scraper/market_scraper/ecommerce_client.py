@@ -56,11 +56,12 @@ class EcommerceClient:
 
         return products
 
-    def fetch_products_for_mfp(self, mfp_item: dict) -> dict:
+    def fetch_products_for_mfp(self, mfp_item: dict, category_context: Optional[list[dict]] = None) -> dict:
         """Fetch all market products for a single MFP item.
 
-        Generates queries from the MFP name + top 2 current + top 2 potential
-        products, then deduplicates and caps results.
+        Executes every planned query, then selects unique products round-robin
+        across the query result sets. This prevents broad searches from filling
+        the cap before category-specific searches (such as lampshades) run.
 
         Returns:
             {
@@ -68,34 +69,49 @@ class EcommerceClient:
                 "products": [normalized product dicts],
             }
         """
-        queries = self.build_search_queries(mfp_item)
-        all_products = []
+        query_plan = self._build_query_plan(mfp_item, category_context=category_context)
         seen_ids = set()
         seen_titles = set()
         query_log = []
+        grouped_products: list[list[dict]] = []
 
-        for query in queries:
+        for plan_item in query_plan:
+            query = plan_item["query"]
             products = self.search_products(query)
             new_count = 0
+            unique_products = []
             for product in products:
                 pid = product.get("product_id", "")
                 title = product.get("title", "").strip().lower()
-                
+
                 # Deduplicate by ID and strict Title match
                 if pid and pid not in seen_ids and title not in seen_titles:
                     seen_ids.add(pid)
                     if title:
                         seen_titles.add(title)
-                    all_products.append(product)
+                    unique_products.append(product)
                     new_count += 1
 
             query_log.append({"query": query, "result_count": new_count})
+            grouped_products.append(unique_products)
 
-            if len(all_products) >= config_market.MAX_PRODUCTS_PER_MFP:
+        # Retain products fairly across every query instead of taking the first
+        # 50 in query order. Each non-empty category query gets a chance to
+        # contribute before additional results from broad searches are used.
+        all_products = []
+        offsets = [0] * len(grouped_products)
+        while len(all_products) < config_market.MAX_PRODUCTS_PER_MFP:
+            made_progress = False
+            for index, products in enumerate(grouped_products):
+                if offsets[index] >= len(products):
+                    continue
+                all_products.append(products[offsets[index]])
+                offsets[index] += 1
+                made_progress = True
+                if len(all_products) >= config_market.MAX_PRODUCTS_PER_MFP:
+                    break
+            if not made_progress:
                 break
-
-        # Cap total products
-        all_products = all_products[: config_market.MAX_PRODUCTS_PER_MFP]
 
         return {
             "queries": query_log,
@@ -149,44 +165,94 @@ class EcommerceClient:
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         return cleaned
 
-    def build_search_queries(self, mfp_item: dict) -> list[str]:
+    def build_search_queries(self, mfp_item: dict, category_context: Optional[list[dict]] = None) -> list[str]:
         """Build targeted search queries for an MFP item.
 
-        Strategy: simple, short queries that maximize result volume.
-        All irrelevant/junk filtering is handled by the LLM classification
-        layer downstream — NOT by restricting search queries.
+        Strategy:
+        1. Always search for the raw material.
+        2. If AI product categories are provided, distribute queries evenly across
+           the distinct categories (1-2 products per category) to ensure diverse
+           market representations rather than one product type dominating.
+        3. Fall back to current and potential products if no category context is provided.
+        """
+        return [
+            plan_item["query"]
+            for plan_item in self._build_query_plan(mfp_item, category_context=category_context)
+        ]
 
-        - 1 query for raw material
-        - 3 queries for current (derived) products
-        - 2 queries for potential (value-added) products
+    def _build_query_plan(self, mfp_item: dict, category_context: Optional[list[dict]] = None) -> list[dict]:
+        """Create a capped query plan that gives every category a primary query.
+
+        The raw-material query is retained for backward-compatible broad
+        coverage. When generated categories are available, their first product
+        is scheduled before any second product from another category. With the
+        configured maximum of five generated categories plus one raw query,
+        this guarantees at least one targeted query per category.
         """
         name = self._get_search_name(mfp_item.get("name", ""))
-        current = mfp_item.get("current_products", [])[:3]
-        potential = mfp_item.get("potential_products", [])[:2]
+        raw_query = self._sanitize_query(f"{name} buy online India")
+        primary_queries: list[dict] = []
+        expansion_queries: list[dict] = []
 
-        queries = []
+        # Category-driven queries: schedule every category's first product
+        # before considering a second product from any category.
+        if category_context and isinstance(category_context, list) and len(category_context) > 0:
+            for cat in category_context:
+                if not isinstance(cat, dict):
+                    continue
+                products = cat.get("products", [])
+                if not isinstance(products, list):
+                    continue
+                category_name = str(cat.get("category_name", "")).strip()
+                product_names = []
+                for product in products:
+                    product_name = product.get("name", "") if isinstance(product, dict) else str(product)
+                    product_name = product_name.strip()
+                    if product_name:
+                        product_names.append(product_name)
 
-        # Raw material query — simple and broad
-        queries.append(self._sanitize_query(f"{name} buy online India"))
+                for index, product_name in enumerate(product_names):
+                    query = self._sanitize_query(f"{name} {product_name} buy online India")
+                    plan_item = {
+                        "query": query,
+                        "category_name": category_name,
+                        "product_name": product_name,
+                    }
+                    if index == 0:
+                        primary_queries.append(plan_item)
+                    else:
+                        expansion_queries.append(plan_item)
+        else:
+            # Fallback to current and potential products from MFP item
+            for product in (
+                list(mfp_item.get("current_products", []))
+                + list(mfp_item.get("potential_products", []))
+            ):
+                product_name = str(product).strip()
+                if product_name:
+                    expansion_queries.append({
+                        "query": self._sanitize_query(f"{name} {product_name} buy online India"),
+                        "category_name": "",
+                        "product_name": product_name,
+                    })
 
-        # Current products (derived — top 3)
-        for product in current:
-            query = self._sanitize_query(f"{product} {name} India")
-            queries.append(query)
+        # Keep the existing raw search, then guarantee category primaries before
+        # spending the remaining query budget on additional category products.
+        query_plan = [{
+            "query": raw_query,
+            "category_name": "",
+            "product_name": "",
+        }] + primary_queries + expansion_queries
 
-        # Potential products (value-added — top 2)
-        for product in potential:
-            query = self._sanitize_query(f"{product} {name} India")
-            queries.append(query)
-
-        # Deduplicate and cap
+        # Deduplicate and cap while retaining the earliest (highest-priority)
+        # representative of a repeated query.
         seen = set()
-        deduped = []
-        for q in queries:
-            key = q.lower().strip()
+        deduped: list[dict] = []
+        for plan_item in query_plan:
+            key = plan_item["query"].lower().strip()
             if key not in seen:
                 seen.add(key)
-                deduped.append(q)
+                deduped.append(plan_item)
 
         return deduped[: config_market.MAX_SEARCH_QUERIES_PER_MFP]
 
