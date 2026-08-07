@@ -14,6 +14,8 @@
 let allMaterials = [];
 let activeMfpId = null;
 let marketCache = {};  // Cache market results per session
+let categoryCache = {};  // Cache product categories per session
+let recommendationCache = {};  // Session-only results keyed by constraints and market evidence
 let currentFilter = "all"; // "all" | "raw" | "derived"
 let currentSort = "confidence"; // default sort
 let showMatchedOnly = false; // false = show all scraped, true = LLM matched only
@@ -171,16 +173,46 @@ function renderDetail(data) {
       ${renderSection('🏘 Clusters', g.clusters, 'cluster')}
     </div>
 
-    <!-- Market Analysis Section -->
+    <!-- Product Categories & Processes Section -->
     <div class="market-section">
-      <h2>📊 Real-Time Market Analysis</h2>
-      <div id="marketPanel">
-        ${marketCache[m.mfp_id]
-          ? renderMarketResults(marketCache[m.mfp_id])
-          : `<button class="market-trigger" onclick="fetchMarket(${m.mfp_id})" id="marketBtn">
-               🔍 Fetch Live Market Data
+      <h2>🏭 Product Categories & Manufacturing Processes</h2>
+      <div id="categoryPanel">
+        ${categoryCache[m.mfp_id]
+          ? renderCategoryResults(categoryCache[m.mfp_id])
+          : `<button class="market-trigger" onclick="fetchCategories(${m.mfp_id})" id="categoryBtn">
+               🔬 Generate Product Categories & Processes
              </button>`
         }
+      </div>
+    </div>
+
+    <!-- Market Analysis Section (unlocked after categories are generated) -->
+    <div class="market-section" id="marketSection">
+      <h2>📊 Real-Time Market Analysis</h2>
+      <div id="marketPanel">
+        ${categoryCache[m.mfp_id]
+          ? (marketCache[m.mfp_id]
+              ? renderMarketResults(marketCache[m.mfp_id])
+              : `<button class="market-trigger" onclick="fetchMarket(${m.mfp_id})" id="marketBtn">
+                   🔍 Fetch Live Market Data
+                 </button>
+                 <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
+                   Will search for products across the generated categories above
+                 </div>`)
+          : `<div class="market-locked">
+               <span class="lock-icon">🔒</span>
+               <p>Generate Product Categories first to unlock market analysis.</p>
+               <div class="substep">Market scraping uses the generated categories to search for relevant products across each category.</div>
+             </div>`
+        }
+      </div>
+    </div>
+
+    <!-- Product Recommendations Section (unlocked after categories and market data) -->
+    <div class="market-section" id="recommendationSection">
+      <h2>Product Recommendations</h2>
+      <div id="recommendationPanel">
+        ${renderRecommendationPanel(m.mfp_id, g.states || [])}
       </div>
     </div>
   `;
@@ -298,7 +330,10 @@ async function fetchMarket(mfpId) {
   try {
     const data = await api(`/api/materials/${mfpId}/market`, { method: "POST" });
     marketCache[mfpId] = data;
+    invalidateRecommendationCache(mfpId);
     panel.innerHTML = renderMarketResults(data);
+    const recommendationPanel = document.getElementById("recommendationPanel");
+    if (recommendationPanel) recommendationPanel.innerHTML = renderRecommendationPanel(mfpId, getActiveMaterialStates());
   } catch (e) {
     panel.innerHTML = `<div class="error-box">Market analysis failed: ${e.message}</div>
       <button class="market-trigger" onclick="fetchMarket(${mfpId})" style="margin-top:12px">🔄 Retry</button>`;
@@ -640,7 +675,277 @@ function setSort(sort, mfpId) {
   document.getElementById("productGrid").innerHTML = renderFilteredProducts(products);
 }
 
+function getActiveMaterialStates() {
+  return [...document.querySelectorAll('.section-card .tag.state')]
+    .map(el => el.textContent.trim()).filter(Boolean);
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>'"]/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  }[char]));
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort()
+      .map(key => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+function recommendationEvidence(market) {
+  return {
+    market_summary: market.market_summary || {},
+    competitor_analysis: market.competitor_analysis || {},
+    top_products: market.top_products || [],
+    product_demand_match: market.product_demand_match || {},
+    regional_market_fit: market.regional_market_fit || [],
+    seasonal_demand: market.seasonal_demand || {}
+  };
+}
+
+function recommendationCacheKey(mfpId, constraints, market) {
+  return String(mfpId) + ':' + stableStringify({
+    constraints,
+    market_context: recommendationEvidence(market)
+  });
+}
+
+function invalidateRecommendationCache(mfpId) {
+  const prefix = String(mfpId) + ':';
+  Object.keys(recommendationCache).forEach(key => {
+    if (key.startsWith(prefix)) delete recommendationCache[key];
+  });
+}
+
 function truncate(str, len) {
   if (!str) return '';
   return str.length > len ? str.substring(0, len) + '…' : str;
+}
+
+// ── Product Categories ─────────────────────────────────────────────────────
+
+function renderRecommendationPanel(mfpId, states) {
+  if (!categoryCache[mfpId] || !marketCache[mfpId] || marketCache[mfpId].status !== 'complete') {
+    const message = !categoryCache[mfpId]
+      ? 'Generate Product Categories first to unlock recommendations.'
+      : 'Fetch live market data first to unlock recommendations.';
+    return '<div class="market-locked"><span class="lock-icon">Locked</span><p>' + message + '</p><div class="substep">Recommendations combine the generated processes with the current market analysis.</div></div>';
+  }
+  const uniqueStates = [...new Set(states)].sort();
+  return '<form class="recommendation-form" onsubmit="submitRecommendations(event, ' + mfpId + ')">' +
+    '<div class="recommendation-controls">' +
+      '<label>Skill level<select name="artisan_skill_level"><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>' +
+      '<label>Budget<select name="budget_constraint"><option>Low</option><option>Medium</option><option>High</option></select></label>' +
+      '<label>Production time<select name="production_time"><option>Quick turnaround</option><option>Moderate</option><option>Long-term</option></select></label>' +
+      '<label>Region<select name="region_context"><option>All listed regions</option>' + uniqueStates.map(state => '<option>' + escapeHtml(state) + '</option>').join('') + '</select></label>' +
+    '</div><label class="motif-field">Cultural motifs (optional)<input name="cultural_motifs" maxlength="280" placeholder="e.g., Gond patterns, local storytelling"></label>' +
+    '<button class="market-trigger" type="submit">Generate recommendations</button></form><div id="recommendationResults"></div>';
+}
+
+async function submitRecommendations(event, mfpId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const market = marketCache[mfpId];
+  if (!market) return;
+  const formData = new FormData(form);
+  const constraints = {
+    artisan_skill_level: formData.get('artisan_skill_level'),
+    budget_constraint: formData.get('budget_constraint'),
+    production_time: formData.get('production_time'),
+    region_context: formData.get('region_context'),
+    cultural_motifs: (formData.get('cultural_motifs') || '').trim() || null
+  };
+  const results = document.getElementById('recommendationResults');
+  const key = recommendationCacheKey(mfpId, constraints, market);
+  if (recommendationCache[key]) {
+    results.innerHTML = renderRecommendationResults(recommendationCache[key], true);
+    return;
+  }
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  results.innerHTML = '<div class="market-loading"><div class="spinner"></div><p>Generating product recommendations...</p></div>';
+  try {
+    const data = await api('/api/materials/' + mfpId + '/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...constraints, market_context: recommendationEvidence(market) })
+    });
+    recommendationCache[key] = data;
+    results.innerHTML = renderRecommendationResults(data, false);
+  } catch (error) {
+    results.innerHTML = '<div class="error-box">Recommendation generation failed: ' + escapeHtml(error.message) + '</div>';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderRecommendationResults(data, fromCache) {
+  const recommendations = data.recommendations || [];
+  if (!recommendations.length) return '<div class="error-box">No recommendations were returned.</div>';
+  const cards = recommendations.map((item, index) => {
+    const guideId = 'artisan-guide-' + data.mfp_id + '-' + index;
+    const guide = (item.artisan_guide || []).map(step => '<li>' + escapeHtml(step) + '</li>').join('');
+    return '<article class="recommendation-card">' +
+      '<div class="recommendation-card-header"><div><h3>' + escapeHtml(item.product_name) + '</h3><span>' + escapeHtml(item.category_name) + '</span></div><span class="diff-badge diff-' + String(item.difficulty || '').toLowerCase() + '">' + escapeHtml(item.difficulty) + '</span></div>' +
+      '<p>' + escapeHtml(item.rationale) + '</p>' +
+      '<div class="recommendation-metrics"><div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost</span></div><div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price</span></div><div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div><div><strong>' + Number(item.demand_score).toFixed(0) + '/100</strong><span>Demand</span></div></div>' +
+      '<div class="recommendation-tags"><span class="pot-badge pot-' + String(item.export_potential || '').toLowerCase() + '">' + escapeHtml(item.export_potential) + ' export</span><span>' + escapeHtml(item.target_customer_segment) + '</span></div>' +
+      '<button class="guide-toggle" type="button" onclick="document.getElementById(' + JSON.stringify(guideId) + ').classList.toggle(' + JSON.stringify('hidden') + ')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
+  }).join('');
+  return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>';
+}
+
+async function fetchCategories(mfpId, forceRefresh = false) {
+  const panel = document.getElementById("categoryPanel");
+
+  panel.innerHTML = `
+    <div class="market-loading">
+      <div class="spinner"></div>
+      <p>Generating product categories & manufacturing processes...</p>
+      <div class="substep">Analyzing material properties with LLM — typically takes 3-6 seconds</div>
+    </div>
+  `;
+
+  try {
+    const url = `/api/materials/${mfpId}/categories` + (forceRefresh ? '?refresh=true' : '');
+    const data = await api(url, { method: "POST" });
+    categoryCache[mfpId] = data;
+    if (forceRefresh) invalidateRecommendationCache(mfpId);
+    panel.innerHTML = renderCategoryResults(data);
+
+    // Unlock the market section now that categories exist
+    const marketPanel = document.getElementById("marketPanel");
+    if (marketPanel && !marketCache[mfpId]) {
+      const catCount = (data.product_categories || []).length;
+      marketPanel.innerHTML = `<button class="market-trigger" onclick="fetchMarket(${mfpId})" id="marketBtn">
+           🔍 Fetch Live Market Data
+         </button>
+         <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
+           Will search for products across the ${catCount} categories generated above
+         </div>`;
+    }
+    const recommendationPanel = document.getElementById("recommendationPanel");
+    if (recommendationPanel) recommendationPanel.innerHTML = renderRecommendationPanel(mfpId, getActiveMaterialStates());
+  } catch (e) {
+    panel.innerHTML = `<div class="error-box">Product categorization failed: ${e.message}</div>
+      <button class="market-trigger" onclick="fetchCategories(${mfpId})" style="margin-top:12px">🔄 Retry</button>`;
+  }
+}
+
+function renderCategoryResults(data) {
+  const categories = data.product_categories || [];
+  if (!categories.length) {
+    return `<div class="error-box" style="border-color:var(--amber);color:var(--amber);background:var(--amber-bg);">
+      No product categories could be generated for this material.
+    </div>`;
+  }
+
+  const cachedBadge = data.cached
+    ? '<span class="cache-badge">⚡ Cached</span>'
+    : `<span class="cache-badge fresh">✨ Generated in ${data.elapsed_seconds}s</span>`;
+
+  const refreshBtn = `<button class="refresh-btn" onclick="fetchCategories(${data.mfp_id}, true)" title="Regenerate with LLM">🔄</button>`;
+
+  let html = `
+    <div class="category-header">
+      <div class="category-stats">
+        <span class="stat-chip">${categories.length} Categories</span>
+        <span class="stat-chip">${categories.reduce((a, c) => a + (c.products || []).length, 0)} Products</span>
+        ${cachedBadge}
+      </div>
+      ${refreshBtn}
+    </div>
+    <div class="category-accordion">
+  `;
+
+  categories.forEach((cat, catIdx) => {
+    const products = cat.products || [];
+    const catIcon = getCategoryIcon(cat.category_name);
+
+    html += `
+      <div class="accordion-item" id="catAccordion${catIdx}">
+        <button class="accordion-header" onclick="toggleAccordion('catAccordion${catIdx}')">
+          <div class="accordion-title">
+            <span class="cat-icon">${catIcon}</span>
+            <span class="cat-name">${cat.category_name}</span>
+            <span class="cat-count">${products.length} product${products.length !== 1 ? 's' : ''}</span>
+          </div>
+          <span class="accordion-arrow">▸</span>
+        </button>
+        <div class="accordion-body">
+          ${products.map(p => renderProductProcess(p)).join('')}
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  return html;
+}
+
+function renderProductProcess(product) {
+  const diffClass = product.difficulty === 'Easy' ? 'diff-easy'
+    : product.difficulty === 'Hard' ? 'diff-hard' : 'diff-medium';
+
+  const potentialClass = product.market_potential === 'high' ? 'pot-high'
+    : product.market_potential === 'low' ? 'pot-low' : 'pot-medium';
+
+  const steps = product.manufacturing_process || [];
+  const skills = product.required_skills || [];
+
+  return `
+    <div class="process-card">
+      <div class="process-header">
+        <div class="process-title">${product.name}</div>
+        <div class="process-badges">
+          <span class="diff-badge ${diffClass}">${product.difficulty || 'Medium'}</span>
+          <span class="pot-badge ${potentialClass}">${(product.market_potential || 'medium').charAt(0).toUpperCase() + (product.market_potential || 'medium').slice(1)} Demand</span>
+        </div>
+      </div>
+      ${product.estimated_cost ? `<div class="process-cost">💰 Est. Cost: ${product.estimated_cost}</div>` : ''}
+
+      <div class="process-section">
+        <div class="process-section-title">📋 Manufacturing Process</div>
+        <div class="process-timeline">
+          ${steps.map((step, i) => `
+            <div class="timeline-step">
+              <div class="timeline-marker">
+                <div class="timeline-number">${i + 1}</div>
+                ${i < steps.length - 1 ? '<div class="timeline-line"></div>' : ''}
+              </div>
+              <div class="timeline-content">${step}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="process-section">
+        <div class="process-section-title">🛠 Required Skills</div>
+        <div class="skill-chips">
+          ${skills.map(s => `<span class="skill-chip">${s}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function toggleAccordion(id) {
+  const item = document.getElementById(id);
+  if (!item) return;
+  item.classList.toggle('open');
+}
+
+function getCategoryIcon(name) {
+  const n = (name || '').toLowerCase();
+  if (n.includes('oil') || n.includes('extract')) return '🫒';
+  if (n.includes('food') || n.includes('beverage') || n.includes('culinar')) return '🍽️';
+  if (n.includes('personal') || n.includes('cosmetic') || n.includes('soap') || n.includes('care')) return '🧴';
+  if (n.includes('handicraft') || n.includes('craft') || n.includes('art')) return '🎨';
+  if (n.includes('medicin') || n.includes('health') || n.includes('ayurved') || n.includes('herbal')) return '💊';
+  if (n.includes('textile') || n.includes('fiber') || n.includes('fabric')) return '🧶';
+  if (n.includes('construction') || n.includes('material') || n.includes('bio')) return '🏗️';
+  return '📦';
 }
