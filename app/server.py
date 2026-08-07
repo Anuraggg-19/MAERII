@@ -2,9 +2,10 @@
 FastAPI server for the MAERII Knowledge Engine demo.
 
 Endpoints:
-  GET  /api/materials            → list all 87 MFP items (from Neo4j)
-  GET  /api/materials/{mfp_id}   → full detail + graph neighbors (from Neo4j)
-  POST /api/materials/{mfp_id}/market → real-time market analysis (Serper + LLM)
+  GET  /api/materials              → list all 115 MFP items (from Neo4j)
+  GET  /api/materials/{mfp_id}     → full detail + graph neighbors (from Neo4j)
+  POST /api/materials/{mfp_id}/market     → real-time market analysis (Serper + LLM)
+  POST /api/materials/{mfp_id}/categories → product categories, processes & skills (LLM + cache)
 
 Static frontend served at /
 """
@@ -19,12 +20,21 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from typing import Any, Optional
+
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.neo4j_client import list_materials, get_material_detail, get_graph_data, close_driver
 from app.market_service import analyze_market_realtime
+from app.product_service import get_product_categories
+from app.recommendation_service import (
+    RecommendationGenerationError,
+    RecommendationValidationError,
+    generate_recommendations,
+)
 
 # ── App ──────────────────────────────────────────────────────────────────────
 
@@ -33,6 +43,26 @@ app = FastAPI(
     description="Raw Material Knowledge Engine — Demo API",
     version="0.1.0",
 )
+
+
+class MarketContextRequest(BaseModel):
+    """Only the current market evidence needed for recommendation generation."""
+
+    market_summary: dict = Field(...)
+    competitor_analysis: dict = Field(default_factory=dict)
+    top_products: list[dict] = Field(default_factory=list)
+    product_demand_match: dict = Field(default_factory=dict)
+    regional_market_fit: list = Field(default_factory=list)
+    seasonal_demand: Any = None
+
+
+class RecommendationRequest(BaseModel):
+    artisan_skill_level: str
+    budget_constraint: str
+    production_time: str
+    region_context: str
+    cultural_motifs: Optional[str] = None
+    market_context: MarketContextRequest
 
 
 # ── API Routes ───────────────────────────────────────────────────────────────
@@ -91,6 +121,50 @@ def api_market_analysis(mfp_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Market analysis failed: {e}")
+
+
+@app.post("/api/materials/{mfp_id}/categories")
+def api_product_categories(mfp_id: int, refresh: bool = False):
+    """Generate product categories with manufacturing processes and skills.
+
+    First call takes 3-6 seconds (LLM generation).
+    Subsequent calls return instantly from persistent cache.
+    Pass ?refresh=true to force re-generation.
+    """
+    try:
+        result = get_product_categories(mfp_id, refresh=refresh)
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Product categorization failed: {e}")
+
+
+@app.post("/api/materials/{mfp_id}/recommend")
+def api_recommend_products(mfp_id: int, request: RecommendationRequest):
+    """Generate product recommendations from completed categories and live market evidence."""
+    try:
+        return generate_recommendations(
+            mfp_id=mfp_id,
+            artisan_skill_level=request.artisan_skill_level,
+            budget_constraint=request.budget_constraint,
+            production_time=request.production_time,
+            region_context=request.region_context,
+            cultural_motifs=request.cultural_motifs,
+            market_context=request.market_context.dict(),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RecommendationValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RecommendationGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Recommendation generation failed: {exc}")
 
 
 # ── Static Files (Frontend) ─────────────────────────────────────────────────
