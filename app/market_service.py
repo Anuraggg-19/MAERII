@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.product_service import get_product_categories
 from mfp_scraper.market_scraper.ecommerce_client import EcommerceClient
 from mfp_scraper.market_scraper.market_extractor import MarketExtractor
 from mfp_scraper.market_scraper.market_models import (
@@ -77,6 +78,10 @@ def analyze_market_realtime(mfp_id: int) -> dict:
 
     all_mfp_items = _load_mfp_items()
 
+    # Load categories (from cache or real-time generator) to guide search queries
+    categories_result = get_product_categories(mfp_id)
+    cat_context = categories_result.get("product_categories", []) if isinstance(categories_result, dict) else []
+
     # 1. Fetch products
     try:
         client = EcommerceClient()
@@ -86,7 +91,7 @@ def analyze_market_realtime(mfp_id: int) -> dict:
             "error": f"Serper API not configured: {e}",
         }
 
-    fetch_result = client.fetch_products_for_mfp(mfp_item)
+    fetch_result = client.fetch_products_for_mfp(mfp_item, category_context=cat_context)
     queries = fetch_result["queries"]
     raw_products = fetch_result["products"]
 
@@ -105,7 +110,11 @@ def analyze_market_realtime(mfp_id: int) -> dict:
     # 2. LLM Classification
     extractor = MarketExtractor()
     classified_products = extractor.classify_products(
-        raw_products, all_mfp_items, target_mfp_id=mfp_id
+        raw_products,
+        all_mfp_items,
+        target_mfp_id=mfp_id,
+        target_category_context=cat_context,
+        classify_all_batches=True,
     )
 
     # Strip any invalid products so they never reach the UI
@@ -268,4 +277,3 @@ def _calculate_per_gram_price(product: dict) -> Optional[float]:
         return None
 
     return round(price / grams, 2)
-
