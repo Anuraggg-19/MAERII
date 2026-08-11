@@ -793,7 +793,7 @@ function renderRecommendationResults(data, fromCache) {
       '<p>' + escapeHtml(item.rationale) + '</p>' +
       '<div class="recommendation-metrics"><div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost</span></div><div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price</span></div><div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div><div><strong>' + Number(item.demand_score).toFixed(0) + '/100</strong><span>Demand</span></div></div>' +
       '<div class="recommendation-tags"><span class="pot-badge pot-' + String(item.export_potential || '').toLowerCase() + '">' + escapeHtml(item.export_potential) + ' export</span><span>' + escapeHtml(item.target_customer_segment) + '</span></div>' +
-      '<button class="guide-toggle" type="button" onclick="document.getElementById(' + JSON.stringify(guideId) + ').classList.toggle(' + JSON.stringify('hidden') + ')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
+      '<button class="guide-toggle" type="button" onclick="document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
   }).join('');
   return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>';
 }

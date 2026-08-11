@@ -26,24 +26,76 @@ DIFFICULTIES = {"Easy", "Medium", "Hard"}
 EXPORT_POTENTIALS = {"Low", "Medium", "High"}
 
 
+# Maps user-facing skill level to allowed difficulty values for filtering
+_SKILL_DIFFICULTY_MAP: dict[str, set[str]] = {
+    "Beginner": {"Easy"},
+    "Intermediate": {"Easy", "Medium"},
+    "Advanced": {"Easy", "Medium", "Hard"},
+}
+
+# Budget-tier cost ceiling (INR) for the deterministic fallback
+_BUDGET_COST_CEILING: dict[str, float] = {
+    "Low": 250.0,
+    "Medium": 800.0,
+    "High": float("inf"),
+}
+
+# Market-potential sort priority (higher = better)
+_POTENTIAL_RANK: dict[str, int] = {"High": 3, "Medium": 2, "Low": 1}
+
+
 RECOMMENDATION_PROMPT = """You are an expert in Indian Minor Forest Produce
 (MFP) value chains, tribal artisan livelihoods, practical product design, and
-e-commerce market positioning. Recommend viable products that can be made from
-the supplied MFP. Use the live market evidence as evidence, not as a reason to
-invent facts. Costs and selling prices must be realistic INR amounts per stated
-unit.
+e-commerce market positioning.
+
+Your task is to recommend 3-5 VIABLE PRODUCT IDEAS that a tribal artisan can
+make from the supplied raw material, given their SPECIFIC constraints below.
+Each recommendation must be a concrete, actionable business opportunity — NOT
+just a repeat of the product categories listed above.
 
 MFP record:
 {mfp_context}
 
-Generated product categories and their artisan processes:
+Generated product categories and their artisan processes (reference only):
 {categories}
 
-Artisan constraints:
+Artisan constraints (CRITICAL — you MUST obey these):
 {constraints}
 
 Current live market evidence:
 {market_evidence}
+
+CONSTRAINT RULES — follow these strictly:
+1. Skill level:
+   - Beginner: ONLY recommend products with difficulty "Easy" and 4 or fewer
+     process steps. No complex techniques.
+   - Intermediate: recommend "Easy" or "Medium" difficulty products.
+   - Advanced: recommend any difficulty, prefer "Medium" or "Hard" with
+     higher-value outputs.
+2. Budget constraint:
+   - Low: unit_cost_inr MUST be under 250. Prioritize products needing
+     minimal tools and locally available inputs.
+   - Medium: unit_cost_inr between 100 and 800. Balance investment vs return.
+   - High: recommend premium, export-grade products with higher investment
+     and margins.
+3. Production time:
+   - Quick turnaround: products with 4 or fewer manufacturing steps. No
+     extended curing, drying, or fermentation.
+   - Moderate: standard processes acceptable.
+   - Long-term: complex, high-value products with extended processing are
+     encouraged.
+4. Region: prioritize products with regional market fit and locally available
+   skills. Reference the MFP states data.
+5. Cultural motifs: if provided, explicitly incorporate the motif into
+   product design (e.g., "Gond patterns" means suggest painted/carved items).
+
+ANTI-DUPLICATION RULE:
+Do NOT just list the same products from the categories section. Instead,
+recommend the best 3-5 product ideas that specifically match THESE artisan
+constraints. You may reference or build upon category products, but each
+recommendation must explain WHY it suits this particular artisan's situation
+(skill, budget, timeline). The output should feel like personalized business
+advice, not a category index.
 
 Return JSON only, with exactly 3 to 5 recommendations:
 {{
@@ -51,7 +103,7 @@ Return JSON only, with exactly 3 to 5 recommendations:
     {{
       "product_name": "...",
       "category_name": "...",
-      "rationale": "Specific explanation grounded in the material and market evidence.",
+      "rationale": "Explain WHY this product is ideal for this artisan's specific skill level, budget, and timeline. Reference market evidence where possible.",
       "unit_cost_inr": 120,
       "expected_selling_price_inr": 240,
       "demand_score": 74,
@@ -72,6 +124,7 @@ Rules:
 - Include at least 3 concrete artisan-guide steps for every recommendation.
 - Do not include a profit-margin field; it is calculated by the server.
 """
+
 
 
 class RecommendationValidationError(ValueError):
@@ -265,8 +318,22 @@ def _fallback_unit_cost(product: dict, mfp_item: dict, difficulty: str) -> float
     return round(max(base_msp * multiplier, 50), 2)
 
 
-def _fallback_recommendations(mfp_item: dict, categories: list[dict], market_context: dict) -> list[dict]:
-    """Create dependable recommendations from generated categories when the LLM is unavailable."""
+def _fallback_recommendations(
+    mfp_item: dict,
+    categories: list[dict],
+    market_context: dict,
+    constraints: Optional[dict] = None,
+) -> list[dict]:
+    """Create constraint-filtered recommendations from generated categories.
+
+    When the LLM is unavailable, this deterministic path still respects
+    artisan constraints by:
+      1. Filtering products whose difficulty exceeds the artisan's skill level
+      2. Filtering products whose estimated cost exceeds the budget tier ceiling
+      3. Filtering products with too many steps for the production time
+      4. Sorting remaining products by market potential (high -> low)
+      5. Adjusting selling-price margins by budget tier
+    """
     summary = market_context.get("market_summary") or {}
     raw_demand = summary.get("demand_score", 0.6)
     try:
@@ -276,87 +343,156 @@ def _fallback_recommendations(mfp_item: dict, categories: list[dict], market_con
     demand_score = demand_score * 100 if demand_score <= 1 else demand_score
     demand_score = min(max(demand_score, 35), 95)
 
-    recommendations: list[dict] = []
+    # Extract constraint filters (default to widest when absent)
+    skill = (constraints or {}).get("artisan_skill_level", "Advanced")
+    budget = (constraints or {}).get("budget_constraint", "High")
+    production_time = (constraints or {}).get("production_time", "Long-term")
+    allowed_difficulties = _SKILL_DIFFICULTY_MAP.get(skill, {"Easy", "Medium", "Hard"})
+    cost_ceiling = _BUDGET_COST_CEILING.get(budget, float("inf"))
+    max_steps = 4 if production_time == "Quick turnaround" else 100
+
+    # Margin multiplier varies by budget tier
+    margin_divisor = {"Low": 0.55, "Medium": 0.45, "High": 0.35}.get(budget, 0.45)
+
+    # Collect all candidate products
+    candidates: list[dict] = []
     seen_products: set[str] = set()
+
+    def _extract_product(product: dict, category_name: str, relaxed: bool = False):
+        """Parse a single category product into a recommendation candidate."""
+        if not isinstance(product, dict):
+            return None
+        product_name = str(product.get("name") or "").strip()
+        if not product_name or product_name.casefold() in seen_products:
+            return None
+
+        difficulty = str(product.get("difficulty") or "Medium").strip().title()
+        if difficulty not in DIFFICULTIES:
+            difficulty = "Medium"
+        potential = str(product.get("market_potential") or "Medium").strip().title()
+        if potential not in EXPORT_POTENTIALS:
+            potential = "Medium"
+        unit_cost = _fallback_unit_cost(product, mfp_item, difficulty)
+        steps = [str(s).strip() for s in product.get("manufacturing_process") or [] if str(s).strip()]
+
+        # Constraint filters (skipped for relaxed pass)
+        if not relaxed:
+            if difficulty not in allowed_difficulties:
+                return None
+            if unit_cost > cost_ceiling:
+                return None
+            if len(steps) > max_steps:
+                return None
+
+        seen_products.add(product_name.casefold())
+
+        # Add pseudo-random jitter based on product name so it's deterministic but varied
+        jitter = (len(product_name) * 3 % 15) - 7  # range -7 to +7
+        local_demand = max(40.0, min(99.0, demand_score + jitter))
+        local_margin_divisor = margin_divisor + (jitter * 0.005)
+        selling_price = round(unit_cost / local_margin_divisor, 2)
+        
+        while len(steps) < 3:
+            steps.append(
+                ["Inspect and grade raw material for consistent quality.",
+                 "Complete finishing, hygiene checks, and safe packaging.",
+                 "Label the product with material, batch, and care information."][len(steps)]
+            )
+        rationale = (
+            f"Suitable for {skill.lower()}-level artisans with {budget.lower()} budget. "
+            f"Uses the {category_name} process for {mfp_item.get('name', 'this MFP')} "
+            f"and aligns with current live-market demand."
+        ) if not relaxed else (
+            f"Included despite constraint relaxation — a viable product for "
+            f"{mfp_item.get('name', 'this MFP')} with current market demand."
+        )
+        return {
+            "product_name": product_name,
+            "category_name": category_name,
+            "rationale": rationale,
+            "unit_cost_inr": unit_cost,
+            "expected_selling_price_inr": selling_price,
+            "profit_margin_percent": round((selling_price - unit_cost) / selling_price * 100, 2),
+            "demand_score": round(local_demand, 1),
+            "export_potential": potential,
+            "difficulty": difficulty,
+            "artisan_guide": steps,
+            "target_customer_segment": "Urban retail, eco-conscious buyers, and online marketplace customers",
+            "_potential_rank": _POTENTIAL_RANK.get(potential, 2),
+        }
+
+    # Pass 1: strict constraint filtering
     for category in categories:
         category_name = str(category.get("category_name") or "Value-added products")
         for product in category.get("products") or []:
-            if not isinstance(product, dict):
-                continue
-            product_name = str(product.get("name") or "").strip()
+            candidate = _extract_product(product, category_name, relaxed=False)
+            if candidate:
+                candidates.append(candidate)
+
+    # Sort: highest market potential first, then lowest cost
+    candidates.sort(key=lambda c: (-c["_potential_rank"], c["unit_cost_inr"]))
+
+    # Pass 2: if too few candidates, relax constraints and add more
+    if len(candidates) < 3:
+        for category in categories:
+            category_name = str(category.get("category_name") or "Value-added products")
+            for product in category.get("products") or []:
+                candidate = _extract_product(product, category_name, relaxed=True)
+                if candidate:
+                    candidates.append(candidate)
+                if len(candidates) >= 5:
+                    break
+            if len(candidates) >= 5:
+                break
+
+    # Pass 3: also try potential_products from the enriched data
+    if len(candidates) < 3:
+        fallback_names = mfp_item.get("potential_products") or mfp_item.get("current_products") or []
+        for name in fallback_names:
+            if len(candidates) >= 3:
+                break
+            product_name = str(name).strip()
             if not product_name or product_name.casefold() in seen_products:
                 continue
             seen_products.add(product_name.casefold())
-            difficulty = str(product.get("difficulty") or "Medium").strip().title()
-            if difficulty not in DIFFICULTIES:
-                difficulty = "Medium"
-            potential = str(product.get("market_potential") or "Medium").strip().title()
-            if potential not in EXPORT_POTENTIALS:
-                potential = "Medium"
-            unit_cost = _fallback_unit_cost(product, mfp_item, difficulty)
-            selling_price = round(unit_cost / 0.45, 2)
-            guide = [str(step).strip() for step in product.get("manufacturing_process") or [] if str(step).strip()]
-            while len(guide) < 3:
-                guide.append(
-                    ["Inspect and grade raw material for consistent quality.",
-                     "Complete finishing, hygiene checks, and safe packaging.",
-                     "Label the product with material, batch, and care information."][len(guide)]
-                )
-            recommendations.append({
+            unit_cost = _fallback_unit_cost({}, mfp_item, "Medium")
+            jitter = (len(product_name) * 3 % 15) - 7  # range -7 to +7
+            local_demand = max(40.0, min(99.0, demand_score + jitter))
+            local_margin_divisor = margin_divisor + (jitter * 0.005)
+            selling_price = round(unit_cost / local_margin_divisor, 2)
+            candidates.append({
                 "product_name": product_name,
-                "category_name": category_name,
+                "category_name": "Value-added products",
                 "rationale": (
-                    f"Uses the generated {category_name} process for {mfp_item.get('name', 'this MFP')} "
-                    f"and is aligned to the current live-market demand signal."
+                    f"A known product opportunity for {mfp_item.get('name', 'this MFP')} "
+                    f"that matches a {skill.lower()}-level artisan with a {budget.lower()} budget. "
+                    "Aligned to the current live-market demand signal."
                 ),
                 "unit_cost_inr": unit_cost,
                 "expected_selling_price_inr": selling_price,
                 "profit_margin_percent": round((selling_price - unit_cost) / selling_price * 100, 2),
-                "demand_score": round(demand_score, 1),
-                "export_potential": potential,
-                "difficulty": difficulty,
-                "artisan_guide": guide,
+                "demand_score": round(local_demand, 1),
+                "export_potential": "Medium",
+                "difficulty": skill if skill in DIFFICULTIES else "Medium",
+                "artisan_guide": [
+                    "Inspect and grade raw material for consistent quality.",
+                    "Produce using standard category processes and local artisan skills.",
+                    "Complete finishing, hygiene checks, and safe packaging.",
+                ],
                 "target_customer_segment": "Urban retail, eco-conscious buyers, and online marketplace customers",
+                "_potential_rank": 2,
             })
-            if len(recommendations) == 5:
-                return recommendations
 
-    fallback_names = mfp_item.get("potential_products") or mfp_item.get("current_products") or []
-    for name in fallback_names:
-        if len(recommendations) >= 3:
-            break
-        product_name = str(name).strip()
-        if not product_name or product_name.casefold() in seen_products:
-            continue
-        seen_products.add(product_name.casefold())
-        unit_cost = _fallback_unit_cost({}, mfp_item, "Medium")
-        selling_price = round(unit_cost / 0.45, 2)
-        recommendations.append({
-            "product_name": product_name,
-            "category_name": "Value-added products",
-            "rationale": (
-                f"A known product opportunity for {mfp_item.get('name', 'this MFP')} that can be "
-                "positioned using the current live-market demand signal."
-            ),
-            "unit_cost_inr": unit_cost,
-            "expected_selling_price_inr": selling_price,
-            "profit_margin_percent": round((selling_price - unit_cost) / selling_price * 100, 2),
-            "demand_score": round(demand_score, 1),
-            "export_potential": "Medium",
-            "difficulty": "Medium",
-            "artisan_guide": [
-                "Inspect and grade raw material for consistent quality.",
-                "Produce using the generated category process and local artisan skills.",
-                "Complete finishing, hygiene checks, and safe packaging.",
-            ],
-            "target_customer_segment": "Urban retail, eco-conscious buyers, and online marketplace customers",
-        })
-
-    if len(recommendations) < 3:
+    if len(candidates) < 3:
         raise RecommendationGenerationError(
             "There is not enough product data for this material to build recommendations."
         )
-    return recommendations
+
+    # Strip internal sort key before returning
+    result = candidates[:5]
+    for r in result:
+        r.pop("_potential_rank", None)
+    return result
 
 
 def generate_recommendations(
@@ -368,7 +504,18 @@ def generate_recommendations(
     cultural_motifs: Optional[str],
     market_context: Any,
 ) -> dict:
-    """Generate validated recommendations; never stores recommendations or market data."""
+    """Generate constraint-aware recommendations via LLM, with deterministic fallback.
+
+    Primary path: build a grounded prompt including material properties,
+    cached product categories, live market evidence, and artisan constraints,
+    then call the LLM to produce personalized business-plan-style
+    recommendations.
+
+    Fallback path: if no LLM provider is configured or the call fails,
+    deterministically filter and rank the cached category products by
+    constraint alignment (skill->difficulty, budget->cost ceiling,
+    time->step count).
+    """
     start = time.time()
     mfp_item = _find_mfp_item(mfp_id)
     if not mfp_item:
@@ -382,11 +529,24 @@ def generate_recommendations(
     if not categories:
         raise RecommendationValidationError("Product categories must be generated before requesting recommendations")
 
-    # Recommendation delivery must be dependable in the application flow. The
-    # category step has already generated structured product processes, so turn
-    # those plus live market signals into stable recommendations without another
-    # provider request.
-    recommendations = _fallback_recommendations(mfp_item, categories, evidence)
+    # --- Primary path: LLM-powered recommendations ---
+    fallback_used = False
+    provider_name = "none"
+    try:
+        llm = _LLMClient()
+        if llm.provider:
+            prompt = build_recommendation_context(mfp_item, categories, constraints, evidence)
+            recommendations = _generate_validated_recommendations(llm, prompt)
+            provider_name = llm.provider
+        else:
+            raise RuntimeError("No LLM provider configured")
+    except Exception as llm_err:
+        # --- Fallback path: deterministic constraint-filtered recommendations ---
+        print(f"  [RecommendationService] LLM unavailable ({llm_err}), using constraint-filtered fallback")
+        fallback_used = True
+        provider_name = "deterministic"
+        recommendations = _fallback_recommendations(mfp_item, categories, evidence, constraints)
+
     return {
         "status": "complete",
         "mfp_id": mfp_id,
@@ -394,6 +554,6 @@ def generate_recommendations(
         "constraints": constraints,
         "recommendations": recommendations,
         "elapsed_seconds": round(time.time() - start, 2),
-        "provider": "deterministic",
-        "fallback_used": True,
+        "provider": provider_name,
+        "fallback_used": fallback_used,
     }

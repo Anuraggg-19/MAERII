@@ -178,17 +178,20 @@ def get_cached_product_categories(mfp_id: int) -> Optional[list[dict]]:
 
 # ── LLM Provider Logic ─────────────────────────────────────────────────────
 
+import threading
+
 class _LLMClient:
     """Lightweight LLM caller with Groq → Gemini fallback.
 
     Reuses the same provider pattern as MarketExtractor.
     """
+    _last_call_time = 0.0
+    _exhausted_models: set[str] = set()
+    _lock = threading.Lock()
 
     def __init__(self):
         self.provider: Optional[str] = None
         self.client = None
-        self._last_call_time = 0.0
-        self.exhausted_models: set[str] = set()
         self._initialize_provider()
 
     def _initialize_provider(self):
@@ -216,11 +219,12 @@ class _LLMClient:
 
     def _rate_limit(self):
         """Enforce a minimum delay between LLM calls."""
-        elapsed = time.time() - self._last_call_time
-        delay = 4.0
-        if elapsed < delay:
-            time.sleep(delay - elapsed)
-        self._last_call_time = time.time()
+        with _LLMClient._lock:
+            elapsed = time.time() - _LLMClient._last_call_time
+            delay = 4.0
+            if elapsed < delay:
+                time.sleep(delay - elapsed)
+            _LLMClient._last_call_time = time.time()
 
     def call(self, prompt: str) -> Optional[dict]:
         """Call the LLM and return parsed JSON, or None on failure."""
@@ -236,7 +240,7 @@ class _LLMClient:
         models = scraper_config.GROQ_MODELS
 
         for model_name in models:
-            if model_name in self.exhausted_models:
+            if model_name in _LLMClient._exhausted_models:
                 continue
 
             for attempt in range(3):
@@ -266,7 +270,7 @@ class _LLMClient:
                         time.sleep(retry_secs)
                         continue
                     if "quota" in error_str.lower() or "exceeded" in error_str.lower():
-                        self.exhausted_models.add(model_name)
+                        _LLMClient._exhausted_models.add(model_name)
                         break
                     if attempt >= 2:
                         break
@@ -291,7 +295,7 @@ class _LLMClient:
         models = scraper_config.GEMINI_MODELS
 
         for model_name in models:
-            if model_name in self.exhausted_models:
+            if model_name in _LLMClient._exhausted_models:
                 continue
 
             for attempt in range(3):
@@ -313,7 +317,7 @@ class _LLMClient:
                     error_str = str(exc)
                     if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
                         if attempt >= 2:
-                            self.exhausted_models.add(model_name)
+                            _LLMClient._exhausted_models.add(model_name)
                             break
                         time.sleep(8)
                         continue
