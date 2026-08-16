@@ -141,83 +141,109 @@ function renderDetail(data) {
   const g = data.graph;
 
   const html = `
-    <!-- Header -->
-    <div class="detail-header">
-      <h1>${m.name}</h1>
-      ${m.scientific_name ? `<div class="sci-name">${m.scientific_name}</div>` : ''}
-      ${m.description ? `<div class="description">${m.description}</div>` : ''}
+    <!-- Tab Navigation -->
+    <div class="detail-tabs">
+      <button class="detail-tab active" onclick="switchTab('overview', this)">📋 Overview</button>
+      <button class="detail-tab" onclick="switchTab('categories', this)">🏭 Categories</button>
+      <button class="detail-tab" onclick="switchTab('market', this)">📊 Market</button>
+      <button class="detail-tab" onclick="switchTab('recommendations', this)">🎯 Recommendations</button>
     </div>
 
-    <!-- Info Chips -->
-    <div class="info-chips">
-      <div class="chip highlight">
-        <span class="chip-label">MSP</span>
-        <span class="chip-value">₹${m.msp || '—'}/${m.unit || 'kg'}</span>
+    <!-- Tab 1: Overview -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="detail-header">
+        <h1>${m.name}</h1>
+        ${m.scientific_name ? `<div class="sci-name">${m.scientific_name}</div>` : ''}
+        ${m.description ? `<div class="description">${m.description}</div>` : ''}
       </div>
-      ${m.category ? `<div class="chip"><span class="chip-label">Category</span><span class="chip-value">${m.category}</span></div>` : ''}
-      ${m.season ? `<div class="chip"><span class="chip-label">Season</span><span class="chip-value">${m.season}</span></div>` : ''}
-      ${m.shelf_life ? `<div class="chip"><span class="chip-label">Shelf Life</span><span class="chip-value">${m.shelf_life}</span></div>` : ''}
-      ${m.availability_band && m.availability_band !== 'unknown' ? `<div class="chip"><span class="chip-label">Availability</span><span class="chip-value">${m.availability_band}</span></div>` : ''}
-    </div>
-
-    <!-- Material Scores (if available) -->
-    ${renderMaterialScores(m)}
-
-    <!-- Knowledge Graph Sections -->
-    <div class="section-grid">
-      ${renderSection('📍 States', g.states, 'state')}
-      ${renderSection('🛠 Skills / Artisan Types', g.skills, 'skill')}
-      ${renderSection('📦 Current Products', g.current_products, 'product')}
-      ${renderSection('💡 Potential Products', g.potential_products, 'potential')}
-      ${renderSection('🗺 Districts', g.districts, 'district')}
-      ${renderSection('🏘 Clusters', g.clusters, 'cluster')}
-    </div>
-
-    <!-- Product Categories & Processes Section -->
-    <div class="market-section">
-      <h2>🏭 Product Categories & Manufacturing Processes</h2>
-      <div id="categoryPanel">
-        ${categoryCache[m.mfp_id]
-          ? renderCategoryResults(categoryCache[m.mfp_id])
-          : `<button class="market-trigger" onclick="fetchCategories(${m.mfp_id})" id="categoryBtn">
-               🔬 Generate Product Categories & Processes
-             </button>`
-        }
+      <div class="info-chips">
+        <div class="chip highlight">
+          <span class="chip-label">MSP</span>
+          <span class="chip-value">₹${m.msp || '—'}/${m.unit || 'kg'}</span>
+        </div>
+        ${m.category ? `<div class="chip"><span class="chip-label">Category</span><span class="chip-value">${m.category}</span></div>` : ''}
+        ${m.season ? `<div class="chip"><span class="chip-label">Season</span><span class="chip-value">${m.season}</span></div>` : ''}
+        ${m.shelf_life ? `<div class="chip"><span class="chip-label">Shelf Life</span><span class="chip-value">${m.shelf_life}</span></div>` : ''}
+        ${m.availability_band && m.availability_band !== 'unknown' ? `<div class="chip"><span class="chip-label">Availability</span><span class="chip-value">${m.availability_band}</span></div>` : ''}
+      </div>
+      ${renderMaterialScores(m)}
+      <div class="section-grid">
+        ${renderSection('📍 States', g.states, 'state')}
+        ${renderSection('🛠 Skills / Artisan Types', g.skills, 'skill')}
+        ${renderSection('📦 Current Products', g.current_products, 'product')}
+        ${renderSection('💡 Potential Products', g.potential_products, 'potential')}
+        ${renderSection('🗺 Districts', g.districts, 'district')}
+        ${renderSection('🏘 Clusters', g.clusters, 'cluster')}
       </div>
     </div>
 
-    <!-- Market Analysis Section (unlocked after categories are generated) -->
-    <div class="market-section" id="marketSection">
-      <h2>📊 Real-Time Market Analysis</h2>
-      <div id="marketPanel">
-        ${categoryCache[m.mfp_id]
-          ? (marketCache[m.mfp_id]
-              ? renderMarketResults(marketCache[m.mfp_id])
-              : `<button class="market-trigger" onclick="fetchMarket(${m.mfp_id})" id="marketBtn">
-                   🔍 Fetch Live Market Data
-                 </button>
-                 <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
-                   Will search for products across the generated categories above
-                 </div>`)
-          : `<div class="market-locked">
-               <span class="lock-icon">🔒</span>
-               <p>Generate Product Categories first to unlock market analysis.</p>
-               <div class="substep">Market scraping uses the generated categories to search for relevant products across each category.</div>
-             </div>`
-        }
+    <!-- Tab 2: Product Categories & Processes -->
+    <div class="tab-panel" id="tab-categories">
+      <div class="market-section">
+        <h2>🏭 Product Categories & Manufacturing Processes</h2>
+        <div id="categoryPanel">
+          ${categoryCache[m.mfp_id]
+            ? renderCategoryResults(categoryCache[m.mfp_id])
+            : `<button class="market-trigger" onclick="fetchCategories(${m.mfp_id})" id="categoryBtn">
+                 🔬 Generate Product Categories & Processes
+               </button>`
+          }
+        </div>
       </div>
     </div>
 
-    <!-- Product Recommendations Section (unlocked after categories and market data) -->
-    <div class="market-section" id="recommendationSection">
-      <h2>Product Recommendations</h2>
-      <div id="recommendationPanel">
-        ${renderRecommendationPanel(m.mfp_id, g.states || [])}
+    <!-- Tab 3: Market Analysis -->
+    <div class="tab-panel" id="tab-market">
+      <div class="market-section" id="marketSection">
+        <h2>📊 Real-Time Market Analysis</h2>
+        <div id="marketPanel">
+          ${categoryCache[m.mfp_id]
+            ? (marketCache[m.mfp_id]
+                ? renderMarketResults(marketCache[m.mfp_id])
+                : `<button class="market-trigger" onclick="fetchMarket(${m.mfp_id})" id="marketBtn">
+                     🔍 Fetch Live Market Data
+                   </button>
+                   <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
+                     Will search for products across the generated categories above
+                   </div>`)
+            : `<div class="market-locked">
+                 <span class="lock-icon">🔒</span>
+                 <p>Generate Product Categories first to unlock market analysis.</p>
+                 <div class="substep">Market scraping uses the generated categories to search for relevant products across each category.</div>
+               </div>`
+          }
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Recommendations -->
+    <div class="tab-panel" id="tab-recommendations">
+      <div class="market-section" id="recommendationSection">
+        <h2>Product Recommendations</h2>
+        <div id="recommendationPanel">
+          ${renderRecommendationPanel(m.mfp_id, g.states || [])}
+        </div>
       </div>
     </div>
   `;
 
   detailViewEl.innerHTML = html;
+}
+
+// ── Tab Switching ──────────────────────────────────────────────────────────
+
+function switchTab(tabName, btnEl) {
+  // Update tab buttons
+  document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+  btnEl.classList.add('active');
+
+  // Update tab panels
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('tab-' + tabName);
+  if (panel) panel.classList.add('active');
+
+  // Scroll main content to top
+  mainContentEl.scrollTop = 0;
 }
 
 // ── Material Scores ────────────────────────────────────────────────────────
@@ -788,10 +814,13 @@ function renderRecommendationResults(data, fromCache) {
   const cards = recommendations.map((item, index) => {
     const guideId = 'artisan-guide-' + data.mfp_id + '-' + index;
     const guide = (item.artisan_guide || []).map(step => '<li>' + escapeHtml(step) + '</li>').join('');
+    const skills = (item.required_skills || []).map(s => '<span class="skill-chip">' + escapeHtml(s) + '</span>').join('');
+    const skillsSection = skills ? '<div class="recommendation-skills"><div class="process-section-title">🛠 Required Skills</div><div class="skill-chips">' + skills + '</div></div>' : '';
     return '<article class="recommendation-card">' +
       '<div class="recommendation-card-header"><div><h3>' + escapeHtml(item.product_name) + '</h3><span>' + escapeHtml(item.category_name) + '</span></div><span class="diff-badge diff-' + String(item.difficulty || '').toLowerCase() + '">' + escapeHtml(item.difficulty) + '</span></div>' +
       '<p>' + escapeHtml(item.rationale) + '</p>' +
       '<div class="recommendation-metrics"><div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost</span></div><div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price</span></div><div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div><div><strong>' + Number(item.demand_score).toFixed(0) + '/100</strong><span>Demand</span></div></div>' +
+      skillsSection +
       '<div class="recommendation-tags"><span class="pot-badge pot-' + String(item.export_potential || '').toLowerCase() + '">' + escapeHtml(item.export_potential) + ' export</span><span>' + escapeHtml(item.target_customer_segment) + '</span></div>' +
       '<button class="guide-toggle" type="button" onclick="document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
   }).join('');
