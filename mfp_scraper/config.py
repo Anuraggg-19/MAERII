@@ -50,13 +50,10 @@ SEARCH_RESULTS_PER_QUERY = 5  # Top N results to fetch per search
 # -- LLM settings ------------------------------------------------------------
 # Models to try in order (falls back if quota is exhausted)
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-3.6-flash",
 ]
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
 ]
 
 TOGETHER_MODELS = [

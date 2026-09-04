@@ -264,6 +264,7 @@ class _LLMClient:
 
                 except Exception as exc:
                     error_str = str(exc)
+                    print(f"  [_call_groq] error: {error_str}")
                     if "429" in error_str or "rate limit" in error_str.lower():
                         retry_match = re.search(r"Please try again in ([\d\.]+)s", error_str)
                         retry_secs = float(retry_match.group(1)) + 1 if retry_match else 10
@@ -315,6 +316,7 @@ class _LLMClient:
 
                 except Exception as exc:
                     error_str = str(exc)
+                    print(f"  [_call_gemini] error: {error_str}")
                     if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
                         if attempt >= 2:
                             _LLMClient._exhausted_models.add(model_name)
