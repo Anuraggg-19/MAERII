@@ -31,6 +31,20 @@ class SerperClient:
             time.sleep(config.SEARCH_DELAY_SECONDS - elapsed)
         self._last_call_time = time.time()
 
+    @staticmethod
+    def _request_error_details(exc: requests.RequestException) -> str:
+        """Expose Serper's actionable error message while keeping keys private."""
+        response = getattr(exc, "response", None)
+        if response is None:
+            return str(exc)
+        try:
+            body = response.text.strip()
+        except Exception:
+            body = ""
+        if body:
+            return f"HTTP {response.status_code}: {body[:500]}"
+        return f"HTTP {response.status_code}: {exc}"
+
     def search(self, query: str, num_results: int = None) -> list[dict]:
         """
         Perform a web search and return list of results.
@@ -72,7 +86,7 @@ class SerperClient:
             return results
 
         except requests.RequestException as e:
-            print(f"  [!] Search error for '{query}': {e}")
+            print(f"  [!] Search error for '{query}': {self._request_error_details(e)}")
             return []
 
     def search_images(self, query: str, num_results: int = 3) -> list[dict]:
@@ -101,7 +115,7 @@ class SerperClient:
             return results
 
         except requests.RequestException as e:
-            print(f"  [!] Image search error for '{query}': {e}")
+            print(f"  [!] Image search error for '{query}': {self._request_error_details(e)}")
             return []
 
 

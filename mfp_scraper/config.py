@@ -9,17 +9,33 @@ from dotenv import load_dotenv
 # -- Load environment variables ----------------------------------------------
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Try .env first, fall back to .env.example
+# Only load the real local environment file.  Example files are documentation,
+# never a source of credentials at runtime.
 _env_path = PROJECT_ROOT / ".env"
-if not _env_path.exists():
-    _env_path = PROJECT_ROOT / ".env.example"
-load_dotenv(_env_path)
+if _env_path.exists():
+    load_dotenv(_env_path)
 
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
+
+
+def _models_from_env(name: str, defaults: tuple[str, ...]) -> list[str]:
+    """Read a comma-separated model list without silently enabling a provider."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        return list(defaults)
+    return [model.strip() for model in value.split(",") if model.strip()]
+
+
+def _provider_order_from_env() -> list[str]:
+    """Return a validated provider order, keeping Gemini as the primary LLM."""
+    configured = os.getenv("LLM_PROVIDER_ORDER", "gemini,groq")
+    valid = {"gemini", "groq"}
+    order = [provider.strip().lower() for provider in configured.split(",")]
+    return [provider for provider in order if provider in valid] or ["gemini", "groq"]
 
 # ── File paths ──────────────────────────────────────────────────────────────
 CSV_PATH = PROJECT_ROOT / "MFP_List_87_Items_Split.csv"
@@ -48,20 +64,32 @@ SERPER_IMAGES_URL = "https://google.serper.dev/images"
 SEARCH_RESULTS_PER_QUERY = 5  # Top N results to fetch per search
 
 # -- LLM settings ------------------------------------------------------------
-# Models to try in order (falls back if quota is exhausted)
-GEMINI_MODELS = [
-    "gemini-3.6-flash",
-]
+# Models to try in order (falls back if quota is exhausted).
+# Gemini 3.6 Flash is the current stable replacement for the retired Gemini 2.x
+# Flash models and supports the JSON output used by this project.
+GEMINI_MODELS = _models_from_env("GEMINI_MODELS", ("gemini-3.6-flash",))
 
-GROQ_MODELS = [
-]
+# Keep Groq opt-in: an API key with no configured model must not take over a
+# request and then fail before Gemini is tried.
+GROQ_MODELS = _models_from_env("GROQ_MODELS", ())
 
-TOGETHER_MODELS = [
+TOGETHER_MODELS = _models_from_env("TOGETHER_MODELS", (
     "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-]
+))
 
-GEMINI_MODEL = GEMINI_MODELS[0]  # Primary model
+LLM_PROVIDER_ORDER = _provider_order_from_env()
+
+
+def configured_llm_providers() -> list[str]:
+    """Return providers that have both credentials and at least one model."""
+    ready = {
+        "gemini": bool(GEMINI_API_KEY and GEMINI_MODELS),
+        "groq": bool(GROQ_API_KEY and GROQ_MODELS),
+    }
+    return [provider for provider in LLM_PROVIDER_ORDER if ready[provider]]
+
+GEMINI_MODEL = GEMINI_MODELS[0] if GEMINI_MODELS else ""  # Primary model
 LLM_TEMPERATURE = 0.2  # Low temperature for factual extraction
 LLM_MAX_RETRIES = 5
 

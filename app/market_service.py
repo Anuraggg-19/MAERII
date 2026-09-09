@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.product_service import get_product_categories
 from mfp_scraper.market_scraper.ecommerce_client import EcommerceClient
+from mfp_scraper.market_scraper.comparison_relevance import build_profile, label_products
 from mfp_scraper.market_scraper.market_extractor import MarketExtractor
 from mfp_scraper.market_scraper.market_models import (
     build_competitor_analysis,
@@ -94,12 +95,19 @@ def analyze_market_realtime(mfp_id: int) -> dict:
     fetch_result = client.fetch_products_for_mfp(mfp_item, category_context=cat_context)
     queries = fetch_result["queries"]
     raw_products = fetch_result["products"]
+    products_scraped = len(raw_products)
+    search_errors = fetch_result.get("errors", [])
 
     if not raw_products:
+        if search_errors:
+            return {
+                "status": "error",
+                "error": "Serper search failed: " + "; ".join(search_errors[:2]),
+            }
         return {
             "status": "no_results",
             "queries": queries,
-            "products_found": 0,
+            "products_found": products_scraped,
             "products_matched": 0,
             "market_summary": None,
             "competitor_analysis": None,
@@ -107,7 +115,37 @@ def analyze_market_realtime(mfp_id: int) -> dict:
             "elapsed_seconds": round(time.time() - start_time, 1),
         }
 
-    # 2. LLM Classification
+    # 2. Deterministic relevance guard before LLM classification.
+    #
+    # Profiles are derived from the MFP's existing metadata. Manual exclusions
+    # exist only for demonstrated ambiguous terms (for example, Rangeeni Lac
+    # versus textile "lace"). Ordinary uncertain results remain available to
+    # the LLM; only explicitly irrelevant collisions are removed.
+    relevance_profile = build_profile(mfp_item)
+    label_products(raw_products, relevance_profile, True)
+    relevance_rejected = sum(
+        product.get("relevance", {}).get("status") == "irrelevant"
+        for product in raw_products
+    )
+    raw_products = [
+        product for product in raw_products
+        if product.get("relevance", {}).get("status") != "irrelevant"
+    ]
+
+    if not raw_products:
+        return {
+            "status": "no_results",
+            "queries": queries,
+            "products_found": products_scraped,
+            "products_matched": 0,
+            "market_summary": None,
+            "competitor_analysis": None,
+            "top_products": [],
+            "relevance_rejected": relevance_rejected,
+            "elapsed_seconds": round(time.time() - start_time, 1),
+        }
+
+    # 3. LLM Classification
     extractor = MarketExtractor()
     classified_products = extractor.classify_products(
         raw_products,
@@ -128,7 +166,7 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         if mfp_id in p.get("matched_mfp_ids", [])
     ]
 
-    # 3. Market Analysis
+    # 4. Market Analysis
     summary = build_market_summary(matched_products)
     competitor_analysis = build_competitor_analysis(matched_products)
     confidence = calculate_confidence(matched_products)
@@ -137,7 +175,7 @@ def analyze_market_realtime(mfp_id: int) -> dict:
     summary["demand_score"] = calculate_demand_score(matched_products, msp)
     summary["trend"] = calculate_trend(matched_products)
 
-    # 4. LLM deeper insights
+    # 5. LLM deeper insights
     llm_analysis = extractor.analyze_market(mfp_item, matched_products)
     if llm_analysis:
         ca = llm_analysis.get("competitor_analysis", {})
@@ -154,7 +192,7 @@ def analyze_market_realtime(mfp_id: int) -> dict:
             llm_analysis.get("demand_indicators", {}).get("key_demand_drivers", [])
         )
 
-    # 5. Build display products
+    # 6. Build display products
     def _build_display(product_list):
         """Convert internal product dicts to display-friendly dicts."""
         result = []
@@ -213,8 +251,11 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         "mfp_id": mfp_id,
         "mfp_name": mfp_item["name"],
         "queries": queries,
-        "products_found": len(raw_products),
+        "products_found": products_scraped,
+        "products_scraped": products_scraped,
+        "products_after_relevance": len(raw_products),
         "products_matched": len(matched_products),
+        "relevance_rejected": relevance_rejected,
         "market_summary": summary,
         "competitor_analysis": competitor_analysis,
         "confidence": confidence,

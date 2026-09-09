@@ -59,10 +59,15 @@ class EnrichmentPipeline:
 
     def __init__(self):
         self.search_client = SerperClient()
-        if config.GROQ_API_KEY:
+        if "gemini" in config.configured_llm_providers():
+            self.extractor = GeminiExtractor()
+        elif "groq" in config.configured_llm_providers():
             self.extractor = GroqExtractor()
         else:
-            self.extractor = GeminiExtractor()
+            raise ValueError(
+                "No LLM provider configured. Set GEMINI_API_KEY (recommended) "
+                "or set both GROQ_API_KEY and GROQ_MODELS."
+            )
         self.enrichment_sources = {}  # Track sources per item
         self.logger = _setup_logger()
 

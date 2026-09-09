@@ -1,7 +1,6 @@
 # ── Sensitive Data ──────────────────────────────────────────
 # API keys
 .env
-.env.example
 
 # User data files
 *.csv

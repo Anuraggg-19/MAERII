@@ -133,6 +133,8 @@ class MarketExtractor:
     def __init__(self):
         self.provider = None
         self.client = None
+        self._clients: dict[str, object] = {}
+        self._providers: list[str] = []
         self._last_call_time = 0.0
         self.exhausted_models: set[str] = set()
         self._initialize_provider()
@@ -253,23 +255,23 @@ class MarketExtractor:
 
     def _initialize_provider(self):
         """Choose an available LLM provider (Groq → Gemini fallback)."""
-        if config_market.GROQ_API_KEY:
+        for provider in config_market.config.configured_llm_providers():
             try:
-                import groq
-                self.client = groq.Groq(api_key=config_market.GROQ_API_KEY)
-                self.provider = "groq"
-                return
+                if provider == "gemini":
+                    from google import genai
+                    self._clients[provider] = genai.Client(api_key=config_market.GEMINI_API_KEY)
+                elif provider == "groq":
+                    import groq
+                    self._clients[provider] = groq.Groq(api_key=config_market.GROQ_API_KEY)
+                else:
+                    continue
+                self._providers.append(provider)
             except Exception:
-                self.client = None
+                continue
 
-        if config_market.GEMINI_API_KEY:
-            try:
-                from google import genai
-                self.client = genai.Client(api_key=config_market.GEMINI_API_KEY)
-                self.provider = "gemini"
-                return
-            except Exception:
-                self.client = None
+        if self._providers:
+            self.provider = self._providers[0]
+            self.client = self._clients[self.provider]
 
     def _rate_limit(self):
         """Enforce delay between LLM calls."""
@@ -373,7 +375,13 @@ class MarketExtractor:
 
         for product in products:
             title_lower = product.get("title", "").lower()
-            matched_keywords = [kw for kw in keywords if kw in title_lower]
+            # Keyword matching must be term-aware. A substring test made the
+            # Rangeeni Lac keyword "lac" match textile "lace", and similar
+            # collisions can occur for other short MFP aliases.
+            matched_keywords = [
+                kw for kw in keywords
+                if re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", title_lower)
+            ]
             if matched_keywords:
                 product["matched_mfp_ids"] = product.get("matched_mfp_ids", [])
                 if target_mfp_id not in product["matched_mfp_ids"]:
@@ -392,10 +400,12 @@ class MarketExtractor:
 
     def _call_llm(self, prompt: str) -> Optional[dict]:
         """Route LLM call to the active provider."""
-        if self.provider == "groq":
-            return self._call_groq(prompt)
-        if self.provider == "gemini":
-            return self._call_gemini(prompt)
+        for provider in self._providers:
+            self.provider = provider
+            self.client = self._clients[provider]
+            result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
+            if result is not None:
+                return result
         return None
 
     def _call_groq(self, prompt: str) -> Optional[dict]:

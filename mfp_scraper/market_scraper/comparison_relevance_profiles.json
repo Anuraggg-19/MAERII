@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "profiles": {
+    "10": {
+      "query_overrides": {
+        "Rangeeni Lac buy online India": "Rangeeni lac natural resin Kerria lacca buy online India"
+      },
+      "positive_terms": [
+        "rangeeni lac",
+        "kerria lacca",
+        "natural lac resin",
+        "lac resin",
+        "shellac",
+        "seedlac",
+        "seed lac",
+        "stick lac",
+        "button lac",
+        "lac dye",
+        "lac wax",
+        "lac bangle",
+        "lac bangles",
+        "lac bangdi",
+        "lac bangdi pack"
+      ],
+      "negative_terms": [
+        "lace lingerie",
+        "shoelace",
+        "dress lace",
+        "fabric lace",
+        "saree lace",
+        "dupatta lace",
+        "lehenga lace",
+        "lehenga",
+        "tassel lace",
+        "embroidery lace",
+        "sequence work lace",
+        "designer lace",
+        "roll lace",
+        "fancy lace"
+      ]
+    },
+    "11": {
+      "query_overrides": {
+        "Kusumi Lac buy online India": "Kusumi lac natural resin Kerria lacca buy online India"
+      },
+      "positive_terms": [
+        "kusumi lac",
+        "kerria lacca",
+        "natural lac resin",
+        "lac resin",
+        "shellac",
+        "seedlac",
+        "seed lac",
+        "stick lac",
+        "button lac",
+        "lac dye",
+        "lac wax",
+        "lac bangle",
+        "lac bangles"
+      ],
+      "negative_terms": [
+        "lace lingerie",
+        "shoelace",
+        "dress lace",
+        "fabric lace",
+        "saree lace",
+        "dupatta lace",
+        "lehenga lace",
+        "lehenga",
+        "tassel lace",
+        "embroidery lace",
+        "sequence work lace",
+        "designer lace",
+        "roll lace",
+        "fancy lace"
+      ]
+    }
+  }
+}

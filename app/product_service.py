@@ -192,6 +192,8 @@ class _LLMClient:
     def __init__(self):
         self.provider: Optional[str] = None
         self.client = None
+        self._clients: dict[str, object] = {}
+        self._providers: list[str] = []
         self._initialize_provider()
 
     def _initialize_provider(self):
@@ -199,23 +201,23 @@ class _LLMClient:
         groq_key = scraper_config.GROQ_API_KEY
         gemini_key = scraper_config.GEMINI_API_KEY
 
-        if groq_key:
+        for provider in scraper_config.configured_llm_providers():
             try:
-                import groq
-                self.client = groq.Groq(api_key=groq_key)
-                self.provider = "groq"
-                return
-            except Exception:
-                pass
+                if provider == "gemini":
+                    from google import genai
+                    self._clients[provider] = genai.Client(api_key=gemini_key)
+                elif provider == "groq":
+                    import groq
+                    self._clients[provider] = groq.Groq(api_key=groq_key)
+                else:
+                    continue
+                self._providers.append(provider)
+            except Exception as exc:
+                print(f"  [_LLMClient] Could not initialize {provider}: {exc}")
 
-        if gemini_key:
-            try:
-                from google import genai
-                self.client = genai.Client(api_key=gemini_key)
-                self.provider = "gemini"
-                return
-            except Exception:
-                pass
+        if self._providers:
+            self.provider = self._providers[0]
+            self.client = self._clients[self.provider]
 
     def _rate_limit(self):
         """Enforce a minimum delay between LLM calls."""
@@ -228,12 +230,13 @@ class _LLMClient:
 
     def call(self, prompt: str) -> Optional[dict]:
         """Call the LLM and return parsed JSON, or None on failure."""
-        if not self.provider:
-            return None
-
-        if self.provider == "groq":
-            return self._call_groq(prompt)
-        return self._call_gemini(prompt)
+        for provider in self._providers:
+            self.provider = provider
+            self.client = self._clients[provider]
+            result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
+            if result is not None:
+                return result
+        return None
 
     def _call_groq(self, prompt: str) -> Optional[dict]:
         """Call Groq API for JSON output."""
@@ -276,16 +279,6 @@ class _LLMClient:
                     if attempt >= 2:
                         break
                     time.sleep(3 * (attempt + 1))
-
-        # Fallback to Gemini if Groq fails
-        if scraper_config.GEMINI_API_KEY and self.provider == "groq":
-            try:
-                from google import genai
-                self.client = genai.Client(api_key=scraper_config.GEMINI_API_KEY)
-                self.provider = "gemini"
-                return self._call_gemini(prompt)
-            except Exception:
-                pass
 
         return None
 

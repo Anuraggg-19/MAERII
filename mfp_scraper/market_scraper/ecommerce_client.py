@@ -32,6 +32,7 @@ class EcommerceClient:
             "Content-Type": "application/json",
         }
         self._last_call_time = 0.0
+        self.errors: list[str] = []
 
     def _rate_limit(self):
         """Enforce delay between API calls."""
@@ -39,6 +40,20 @@ class EcommerceClient:
         if elapsed < config_market.ECOMMERCE_DELAY_SECONDS:
             time.sleep(config_market.ECOMMERCE_DELAY_SECONDS - elapsed)
         self._last_call_time = time.time()
+
+    @staticmethod
+    def _request_error_details(exc: requests.RequestException) -> str:
+        """Keep the useful Serper error body without ever logging credentials."""
+        response = getattr(exc, "response", None)
+        if response is None:
+            return str(exc)
+        try:
+            body = response.text.strip()
+        except Exception:
+            body = ""
+        if body:
+            return f"HTTP {response.status_code}: {body[:500]}"
+        return f"HTTP {response.status_code}: {exc}"
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -116,6 +131,7 @@ class EcommerceClient:
         return {
             "queries": query_log,
             "products": all_products,
+            "errors": list(dict.fromkeys(getattr(self, "errors", []))),
         }
 
     @staticmethod
@@ -298,7 +314,9 @@ class EcommerceClient:
             return products
 
         except requests.RequestException as exc:
-            print(f"  [!] Shopping search error for '{query}': {exc}")
+            detail = self._request_error_details(exc)
+            self.errors.append(f"shopping: {detail}")
+            print(f"  [!] Shopping search error for '{query}': {detail}")
             return []
 
     def _search_web_products(self, query: str, num_results: int) -> list[dict]:
@@ -348,7 +366,9 @@ class EcommerceClient:
             return products
 
         except requests.RequestException as exc:
-            print(f"  [!] Web search error for '{query}': {exc}")
+            detail = self._request_error_details(exc)
+            self.errors.append(f"web: {detail}")
+            print(f"  [!] Web search error for '{query}': {detail}")
             return []
 
     def _extract_price_from_snippet(self, snippet: str) -> Optional[str]:

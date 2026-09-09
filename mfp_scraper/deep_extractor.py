@@ -107,6 +107,8 @@ class DeepExtractor:
     def __init__(self):
         self.provider = None
         self.client = None
+        self._clients: dict[str, object] = {}
+        self._providers: list[str] = []
         self._last_call_time = 0.0
         self.exhausted_models = set()
         self._initialize_provider()
@@ -132,25 +134,25 @@ class DeepExtractor:
 
     def _initialize_provider(self):
         """Choose an available remote provider if possible."""
-        if config.GROQ_API_KEY:
+        for provider in config.configured_llm_providers():
             try:
-                import groq
+                if provider == "gemini":
+                    from google import genai
 
-                self.client = groq.Groq(api_key=config.GROQ_API_KEY)
-                self.provider = "groq"
-                return
+                    self._clients[provider] = genai.Client(api_key=config.GEMINI_API_KEY)
+                elif provider == "groq":
+                    import groq
+
+                    self._clients[provider] = groq.Groq(api_key=config.GROQ_API_KEY)
+                else:
+                    continue
+                self._providers.append(provider)
             except Exception:
-                self.client = None
+                continue
 
-        if config.GEMINI_API_KEY:
-            try:
-                from google import genai
-
-                self.client = genai.Client(api_key=config.GEMINI_API_KEY)
-                self.provider = "gemini"
-                return
-            except Exception:
-                self.client = None
+        if self._providers:
+            self.provider = self._providers[0]
+            self.client = self._clients[self.provider]
 
     def _rate_limit(self):
         """Enforce delay between LLM calls."""
@@ -173,10 +175,16 @@ class DeepExtractor:
             source_text=dossier[:12000],
         )
 
-        if self.provider == "groq":
-            return self._extract_groq(prompt, documents)
-        if self.provider == "gemini":
-            return self._extract_gemini(prompt, documents)
+        for provider in self._providers:
+            self.provider = provider
+            self.client = self._clients[provider]
+            result = (
+                self._extract_gemini(prompt, documents)
+                if provider == "gemini"
+                else self._extract_groq(prompt, documents)
+            )
+            if result is not None:
+                return result
         return None
 
     def _extract_groq(self, prompt: str, documents: list[dict]) -> Optional[dict]:

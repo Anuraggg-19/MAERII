@@ -560,9 +560,12 @@ def _fallback_recommendations(
                 candidate = _extract_product(product, category_name, relaxed=True)
                 if candidate:
                     candidates.append(candidate)
-                if len(candidates) >= 5:
+                # Relax only enough to return the minimum useful set. Filling
+                # all five slots with out-of-constraint products makes very
+                # different artisan inputs produce identical recommendations.
+                if len(candidates) >= 3:
                     break
-            if len(candidates) >= 5:
+            if len(candidates) >= 3:
                 break
 
     # Pass 3: also try potential_products from the enriched data
