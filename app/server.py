@@ -5,6 +5,7 @@ Endpoints:
   GET  /api/materials              → list all 115 MFP items (from Neo4j)
   GET  /api/materials/{mfp_id}     → full detail + graph neighbors (from Neo4j)
   POST /api/materials/{mfp_id}/market     → real-time market analysis (Serper + LLM)
+  POST /api/materials/{mfp_id}/market/compare → isolated Serper vs Scrapingdog comparison
   POST /api/materials/{mfp_id}/categories → product categories, processes & skills (LLM + cache)
 
 Static frontend served at /
@@ -29,6 +30,8 @@ from fastapi.responses import FileResponse
 
 from app.neo4j_client import list_materials, get_material_detail, get_graph_data, close_driver
 from app.market_service import analyze_market_realtime
+from app.market_comparison_service import compare_market_providers
+from app.open_source_market_service import OpenSourcePipelineError, run_open_source_market_experiment
 from app.product_service import get_product_categories
 from app.recommendation_service import (
     RecommendationGenerationError,
@@ -110,7 +113,7 @@ def api_market_analysis(mfp_id: int):
     """Run real-time market analysis for one MFP item.
 
     This call takes 20-40 seconds as it makes live API calls
-    to Serper (shopping search) and Groq (LLM classification).
+    to Serper (shopping search) and the configured LLM (Gemini by default).
     """
     try:
         result = analyze_market_realtime(mfp_id)
@@ -121,6 +124,32 @@ def api_market_analysis(mfp_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Market analysis failed: {e}")
+
+
+@app.post("/api/materials/{mfp_id}/market/compare")
+def api_compare_market_providers(mfp_id: int):
+    """Compare raw Google Shopping results without changing market analysis."""
+    try:
+        return compare_market_providers(mfp_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Market provider comparison failed: {exc}")
+
+
+@app.post("/api/materials/{mfp_id}/market/open-source")
+def api_open_source_market_experiment(mfp_id: int):
+    """Run the fully open-source market experiment without touching production."""
+    try:
+        return run_open_source_market_experiment(mfp_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except OpenSourcePipelineError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Open-source market experiment failed: {exc}")
 
 
 @app.post("/api/materials/{mfp_id}/categories")

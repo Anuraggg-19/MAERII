@@ -12,6 +12,7 @@ SERPER_API_KEY = config.SERPER_API_KEY
 GEMINI_API_KEY = config.GEMINI_API_KEY
 GROQ_API_KEY = config.GROQ_API_KEY
 TOGETHER_API_KEY = config.TOGETHER_API_KEY
+SCRAPINGDOG_API_KEY = config.SCRAPINGDOG_API_KEY
 
 # ── LLM model lists (same as Module 1 for consistency) ──────────────────────
 GEMINI_MODELS = config.GEMINI_MODELS
@@ -30,10 +31,27 @@ MARKET_ANALYSIS_LOG_PATH = DATA_DIR / "market_analysis_log.json"
 MARKET_SOURCES_PATH = DATA_DIR / "market_sources.json"
 MARKET_RUNS_DIR = DATA_DIR / "market_runs"
 MARKET_BACKUPS_DIR = DATA_DIR / "market_backups"
+MARKET_COMPARISONS_DIR = DATA_DIR / "market_comparisons"
 
 # ── Serper API endpoints ────────────────────────────────────────────────────
 SERPER_SHOPPING_URL = "https://google.serper.dev/shopping"
 SERPER_SEARCH_URL = config.SERPER_SEARCH_URL
+SCRAPINGDOG_SHOPPING_URL = "https://api.scrapingdog.com/google_shopping"
+SCRAPINGDOG_IMMERSIVE_PRODUCT_URL = "https://api.scrapingdog.com/google_immersive_product"
+SCRAPINGDOG_PRODUCT_URL = "https://api.scrapingdog.com/google_product"
+SCRAPINGDOG_SCRAPE_URL = "https://api.scrapingdog.com/scrape"
+MARKET_COMPARISON_MODE = config.MARKET_COMPARISON_MODE
+MARKET_COMPARISON_STORE_RAW = config.MARKET_COMPARISON_STORE_RAW
+MARKET_COMPARISON_RELEVANCE_FILTER = config.MARKET_COMPARISON_RELEVANCE_FILTER
+MARKET_COMPARISON_DESTINATION_LIMIT = config.MARKET_COMPARISON_DESTINATION_LIMIT
+MARKET_COMPARISON_DESTINATION_CANDIDATE_LIMIT = config.MARKET_COMPARISON_DESTINATION_CANDIDATE_LIMIT
+MARKET_COMPARISON_DESTINATION_DYNAMIC = config.MARKET_COMPARISON_DESTINATION_DYNAMIC
+
+# Published Scrapingdog rates, used only to report an approximate comparison cost.
+SCRAPINGDOG_SHOPPING_CREDITS = 10
+SCRAPINGDOG_IMMERSIVE_CREDITS = 5
+SCRAPINGDOG_PRODUCT_CREDITS = 5
+SCRAPINGDOG_DYNAMIC_SCRAPE_CREDITS = 5
 
 # ── Search configuration ───────────────────────────────────────────────────
 # Per MFP: search MFP name + top 2 current_products + top 2 potential_products

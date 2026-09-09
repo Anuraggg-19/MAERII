@@ -14,11 +14,17 @@
 let allMaterials = [];
 let activeMfpId = null;
 let marketCache = {};  // Cache market results per session
+let marketComparisonCache = {}; // Comparison-only provider results per session
+let openSourceMarketCache = {}; // Isolated SearXNG + Crawl4AI + Ollama experiment results
 let categoryCache = {};  // Cache product categories per session
 let recommendationCache = {};  // Session-only results keyed by constraints and market evidence
 let currentFilter = "all"; // "all" | "raw" | "derived"
 let currentSort = "confidence"; // default sort
 let showMatchedOnly = false; // false = show all scraped, true = LLM matched only
+let comparisonFilter = "all"; // all | both | serper | scrapingdog | enriched
+let comparisonRelevanceFilter = "relevant"; // relevant | needs_review | irrelevant | all
+let comparisonQuery = "all";
+let openSourceFilter = "accepted";
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 
@@ -200,17 +206,12 @@ function renderDetail(data) {
           ${categoryCache[m.mfp_id]
             ? (marketCache[m.mfp_id]
                 ? renderMarketResults(marketCache[m.mfp_id])
-                : `<button class="market-trigger" onclick="fetchMarket(${m.mfp_id})" id="marketBtn">
-                     🔍 Fetch Live Market Data
-                   </button>
-                   <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
-                     Will search for products across the generated categories above
-                   </div>`)
+                : renderMarketActions(m.mfp_id, true))
             : `<div class="market-locked">
                  <span class="lock-icon">🔒</span>
                  <p>Generate Product Categories first to unlock market analysis.</p>
                  <div class="substep">Market scraping uses the generated categories to search for relevant products across each category.</div>
-               </div>`
+               </div>${renderMarketActions(m.mfp_id, false)}`
           }
         </div>
       </div>
@@ -366,11 +367,225 @@ async function fetchMarket(mfpId) {
   }
 }
 
+function renderMarketActions(mfpId, categoriesReady) {
+  const marketAction = categoriesReady
+    ? `<button class="market-trigger" onclick="fetchMarket(${mfpId})" id="marketBtn">🔍 Fetch Live Market Data</button>
+       <div class="substep">Uses Serper listings and LLM market analysis.</div>`
+    : '';
+  return `<div class="market-action-row">
+    <div class="market-action">${marketAction}</div>
+    ${renderComparisonLauncher(mfpId)}
+    ${renderOpenSourceLauncher(mfpId)}
+  </div>`;
+}
+
+function renderComparisonLauncher(mfpId, compact = false) {
+  return `<div class="market-action comparison-action${compact ? ' comparison-action-compact' : ''}">
+    <button class="market-trigger comparison-trigger" onclick="fetchMarketComparison(${mfpId})">⚖ Compare Data Sources</button>
+    <div class="substep">Serper versus Scrapingdog, including destination-page detail. Does not affect scores or recommendations.</div>
+  </div>`;
+}
+
+function renderOpenSourceLauncher(mfpId, compact = false) {
+  return `<div class="market-action open-source-action${compact ? ' comparison-action-compact' : ''}">
+    <button class="market-trigger open-source-trigger" onclick="fetchOpenSourceMarket(${mfpId})">🌿 Compare Open-Source Pipeline</button>
+    <div class="substep">SearXNG discovery, Crawl4AI page extraction, and local Ollama classification. Never changes production data.</div>
+  </div>`;
+}
+
+async function fetchOpenSourceMarket(mfpId) {
+  const panel = document.getElementById("marketPanel");
+  if (!panel) return;
+  panel.innerHTML = `<div class="market-loading"><div class="spinner"></div><p>Running the open-source market experiment...</p>
+    <div class="substep">Discovering URLs with SearXNG, crawling pages with Crawl4AI, then classifying with your local Ollama model.</div>
+    <div class="substep" style="margin-top:8px;">This can take a while on a local model and does not alter Serper, Gemini, scores, or recommendations.</div></div>`;
+  try {
+    const data = await api(`/api/materials/${mfpId}/market/open-source`, { method: "POST" });
+    openSourceMarketCache[mfpId] = data;
+    openSourceFilter = "accepted";
+    panel.innerHTML = renderOpenSourceMarket(data, marketCache[mfpId]);
+  } catch (e) {
+    panel.innerHTML = `<div class="error-box">Open-source experiment failed: ${escapeHtml(e.message)}</div>
+      <button class="market-trigger open-source-trigger" onclick="fetchOpenSourceMarket(${mfpId})" style="margin-top:12px">🔄 Retry open-source experiment</button>`;
+  }
+}
+
+async function fetchMarketComparison(mfpId) {
+  const panel = document.getElementById("marketPanel");
+  if (!panel) return;
+  panel.innerHTML = `<div class="market-loading">
+    <div class="spinner"></div><p>Comparing product data sources...</p>
+    <div class="substep">Searching both providers, then enriching a limited set of Scrapingdog destination pages.</div>
+    <div class="substep" style="margin-top:8px;">This is comparison-only and does not change your market analysis.</div>
+  </div>`;
+  try {
+    const data = await api(`/api/materials/${mfpId}/market/compare`, { method: "POST" });
+    marketComparisonCache[mfpId] = data;
+    comparisonFilter = "all";
+    comparisonRelevanceFilter = "relevant";
+    comparisonQuery = "all";
+    panel.innerHTML = renderMarketComparison(data);
+  } catch (e) {
+    panel.innerHTML = `<div class="error-box">Source comparison failed: ${escapeHtml(e.message)}</div>
+      <button class="market-trigger comparison-trigger" onclick="fetchMarketComparison(${mfpId})" style="margin-top:12px">🔄 Retry comparison</button>`;
+  }
+}
+
+function comparisonProducts(data, selectedQuery = comparisonQuery) {
+  const products = [];
+  (data.queries || []).forEach(run => {
+    if (selectedQuery !== "all" && run.query !== selectedQuery) return;
+    ["serper", "scrapingdog"].forEach(provider => {
+      (run[provider]?.products || []).forEach(product => products.push({ ...product, comparison_provider: provider, comparison_query: run.query }));
+    });
+  });
+  const deduped = [];
+  const seen = new Set();
+  products.forEach(product => {
+    const key = `${product.comparison_provider}:${product.product_id || `${product.title}|${product.seller}|${product.price}`}`;
+    if (!seen.has(key)) { seen.add(key); deduped.push(product); }
+  });
+  const keysByProvider = { serper: new Set(), scrapingdog: new Set() };
+  deduped.forEach(product => keysByProvider[product.comparison_provider].add(`${String(product.title || '').toLowerCase()}|${String(product.seller || '').toLowerCase()}|${product.price ?? ''}`));
+  return deduped.map(product => ({ ...product, comparison_status: keysByProvider[product.comparison_provider === 'serper' ? 'scrapingdog' : 'serper'].has(`${String(product.title || '').toLowerCase()}|${String(product.seller || '').toLowerCase()}|${product.price ?? ''}`) ? 'both' : product.comparison_provider }));
+}
+
+function renderMarketComparison(data) {
+  const overall = data.overall_comparison || {};
+  const destination = data.scrapingdog_destination_pages || {};
+  const relevance = data.relevance_filter || {};
+  const products = comparisonProducts(data);
+  const bothCount = products.filter(product => product.comparison_status === 'both').length;
+  const enrichedCount = products.filter(product => product.destination_page?.status === 'complete').length;
+  const queryOptions = (data.queries || []).map(run => `<option value="${escapeHtml(run.query)}" ${comparisonQuery === run.query ? 'selected' : ''}>${escapeHtml(run.query)}</option>`).join('');
+  const completeness = destination.field_completeness || {};
+  const addedFields = Object.entries(completeness).filter(([, value]) => value > 0).map(([field, value]) => `<span class="tag product">${escapeHtml(field.replaceAll('_', ' '))} ${Math.round(value * 100)}%</span>`).join('') || '<span class="empty-tag">No completed destination pages yet</span>';
+  const relevanceCount = status => products.filter(product => (product.relevance?.status || 'needs_review') === status).length;
+  return `<div class="comparison-results">
+    <div class="comparison-heading"><div><h3>⚖ Source Comparison</h3><p>Raw product discovery comparison only. It never changes market scores, LLM matching, or recommendations.</p></div>
+      <button class="match-toggle" onclick="returnToMarketActions(${data.mfp_id})">← Back to Market</button></div>
+    <div class="market-stats comparison-stats">
+      ${comparisonStat(overall.serper_unique_products || 0, 'Serper listings')}
+      ${comparisonStat(overall.scrapingdog_unique_products || 0, 'Scrapingdog listings')}
+      ${comparisonStat(`${overall.overlap_percentage || 0}%`, 'Provider overlap')}
+      ${comparisonStat(overall.serper_only?.length || 0, 'Serper only')}
+      ${comparisonStat(overall.scrapingdog_only?.length || 0, 'Scrapingdog only')}
+      ${comparisonStat(`${destination.completed || 0}/${destination.attempted || 0}`, 'Destination pages')}
+    </div>
+    <div class="comparison-insight"><strong>What Scrapingdog adds:</strong> ${destination.completed || 0} retailer pages scraped. ${destination.errors ? `${destination.errors} failed. ` : ''} ${destination.skipped ? `${destination.skipped} skipped because no retailer link was available. ` : ''}Only relevant listings are sent to destination scraping first; uncertain listings are used only if needed, and rejected listings are never scraped.<div class="tag-list inline">${addedFields}</div></div>
+    <div class="comparison-controls">
+      <label>Query <select class="sort-select" onchange="setComparisonQuery(this.value, ${data.mfp_id})"><option value="all">All queries</option>${queryOptions}</select></label>
+      <div class="filter-tabs comparison-filter-tabs">
+        ${comparisonFilterButton('all', `All (${products.length})`, data.mfp_id)}
+        ${comparisonFilterButton('both', `Both (${bothCount})`, data.mfp_id)}
+        ${comparisonFilterButton('serper', `Serper only (${overall.serper_only?.length || 0})`, data.mfp_id)}
+        ${comparisonFilterButton('scrapingdog', `Scrapingdog only (${overall.scrapingdog_only?.length || 0})`, data.mfp_id)}
+        ${comparisonFilterButton('enriched', `Destination enriched (${enrichedCount})`, data.mfp_id)}
+      </div>
+    </div>
+    <div class="relevance-controls">
+      <div><strong>Relevance view</strong><span>${relevance.enabled ? 'Local rules only — no LLM classification.' : 'Filtering disabled.'}</span></div>
+      <div class="filter-tabs comparison-filter-tabs">
+        ${comparisonRelevanceFilterButton('relevant', `Relevant (${relevanceCount('relevant')})`, data.mfp_id)}
+        ${comparisonRelevanceFilterButton('needs_review', `Needs review (${relevanceCount('needs_review')})`, data.mfp_id)}
+        ${comparisonRelevanceFilterButton('irrelevant', `Rejected (${relevanceCount('irrelevant')})`, data.mfp_id)}
+        ${comparisonRelevanceFilterButton('all', `All raw (${products.length})`, data.mfp_id)}
+      </div>
+      ${relevance.manual_profile_applied ? '<small>A targeted ambiguity profile is active for this material. Raw provider listings are still retained.</small>' : ''}
+    </div>
+    <div class="comparison-product-grid">${renderComparisonProducts(products)}</div>
+    <div class="comparison-footer">Saved comparison: ${escapeHtml((data.comparison_file || '').split(/[\\/]/).pop() || 'session result')}</div>
+  </div>`;
+}
+
+function comparisonStat(value, label) { return `<div class="stat-card"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`; }
+function comparisonFilterButton(value, label, mfpId) { return `<button class="filter-tab ${comparisonFilter === value ? 'active' : ''}" onclick="setComparisonFilter('${value}', ${mfpId})">${label}</button>`; }
+function comparisonRelevanceFilterButton(value, label, mfpId) { return `<button class="filter-tab ${comparisonRelevanceFilter === value ? 'active' : ''}" onclick="setComparisonRelevanceFilter('${value}', ${mfpId})">${label}</button>`; }
+
+function renderComparisonProducts(products) {
+  const filtered = products.filter(product => {
+    const providerMatch = comparisonFilter === 'all' || product.comparison_status === comparisonFilter || (comparisonFilter === 'enriched' && product.destination_page?.status === 'complete');
+    const relevanceMatch = comparisonRelevanceFilter === 'all' || (product.relevance?.status || 'needs_review') === comparisonRelevanceFilter;
+    return providerMatch && relevanceMatch;
+  });
+  if (!filtered.length) return '<div class="empty-products">No products match this comparison filter.</div>';
+  return filtered.map(product => {
+    const page = product.destination_page?.product_page;
+    const destination = product.destination_page || {};
+    const image = page?.image_urls?.[0] || product.image_url;
+    const sourceBadge = product.comparison_status === 'both' ? '<span class="comparison-badge both">Found by both</span>' : `<span class="comparison-badge ${product.comparison_provider}">${product.comparison_provider === 'serper' ? 'Serper only' : 'Scrapingdog only'}</span>`;
+    const pageBadge = destination.status === 'complete' ? '<span class="comparison-badge enriched">✓ Destination scraped</span>' : '';
+    const relevanceStatus = product.relevance?.status || 'needs_review';
+    const relevanceLabel = relevanceStatus === 'relevant' ? 'Relevant' : relevanceStatus === 'irrelevant' ? 'Rejected' : relevanceStatus === 'not_evaluated' ? 'Not evaluated' : 'Needs review';
+    const relevanceBadge = `<span class="comparison-badge relevance ${escapeHtml(relevanceStatus)}">${relevanceLabel}</span>`;
+    const relevanceReason = product.relevance?.reason ? `<div class="relevance-reason">${escapeHtml(product.relevance.reason)}</div>` : '';
+    const details = destination.status === 'complete' ? `<details class="destination-details"><summary>View destination-page details</summary><div class="destination-detail-grid">
+      ${comparisonDetail('Brand', page.brand)}${comparisonDetail('Availability', page.availability)}${comparisonDetail('SKU', page.sku)}${comparisonDetail('Page price', page.price ? `${page.currency || ''} ${page.price}` : '')}
+    </div>${page.description ? `<p>${escapeHtml(page.description)}</p>` : ''}${page.attributes?.length ? `<div class="tag-list inline">${page.attributes.map(attribute => `<span class="tag product">${escapeHtml(attribute.name)}: ${escapeHtml(attribute.value)}</span>`).join('')}</div>` : ''}${destination.destination_url ? `<a class="destination-link" target="_blank" rel="noopener" href="${escapeHtml(destination.destination_url)}">Open retailer page ↗</a>` : ''}</details>` : '';
+    return `<article class="comparison-product-card ${destination.status === 'complete' ? 'has-destination' : ''}">
+      ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(product.title)}" class="product-image" onerror="this.remove()">` : '<div class="product-image no-image">📦</div>'}
+      <div class="card-body"><div class="comparison-badges">${sourceBadge}${relevanceBadge}${pageBadge}</div>
+      ${product.url ? `<a href="${escapeHtml(product.url)}" target="_blank" rel="noopener" class="card-title">${escapeHtml(product.title)}</a>` : `<div class="card-title">${escapeHtml(product.title)}</div>`}
+      <div class="card-price-row"><span class="card-price">${product.price != null ? `₹${Math.round(product.price)}` : '—'}</span>${product.rating ? `<span class="card-rating">${escapeHtml(product.rating)} ★</span>` : ''}</div>
+      <div class="card-meta"><span>${escapeHtml(product.seller || 'Unknown seller')}</span><span class="card-source">Rank ${escapeHtml(product.provider_rank || '—')}</span></div>${relevanceReason}${details}</div></article>`;
+  }).join('');
+}
+function comparisonDetail(label, value) { return value ? `<div><span>${label}</span><strong>${escapeHtml(value)}</strong></div>` : ''; }
+function setComparisonFilter(filter, mfpId) { comparisonFilter = filter; const panel = document.getElementById('marketPanel'); if (panel && marketComparisonCache[mfpId]) panel.innerHTML = renderMarketComparison(marketComparisonCache[mfpId]); }
+function setComparisonRelevanceFilter(filter, mfpId) { comparisonRelevanceFilter = filter; const panel = document.getElementById('marketPanel'); if (panel && marketComparisonCache[mfpId]) panel.innerHTML = renderMarketComparison(marketComparisonCache[mfpId]); }
+function setComparisonQuery(query, mfpId) { comparisonQuery = query; comparisonFilter = 'all'; const panel = document.getElementById('marketPanel'); if (panel && marketComparisonCache[mfpId]) panel.innerHTML = renderMarketComparison(marketComparisonCache[mfpId]); }
+function setOpenSourceFilter(filter, mfpId) { openSourceFilter = filter; const panel = document.getElementById('marketPanel'); if (panel && openSourceMarketCache[mfpId]) panel.innerHTML = renderOpenSourceMarket(openSourceMarketCache[mfpId], marketCache[mfpId]); }
+
+function renderOpenSourceMarket(data, production) {
+  const summary = data.summary || {};
+  const products = data.products || [];
+  const accepted = products.filter(product => ['raw', 'derived'].includes(product.local_classification?.status)).length;
+  const productionReady = production?.status === 'complete';
+  const filter = product => {
+    const relevance = product.relevance?.status || 'needs_review';
+    const classification = product.local_classification?.status || 'not_classified';
+    if (openSourceFilter === 'accepted') return ['raw', 'derived'].includes(classification);
+    if (openSourceFilter === 'relevant') return relevance === 'relevant';
+    if (openSourceFilter === 'rejected') return relevance === 'irrelevant' || classification === 'invalid';
+    return true;
+  };
+  const visible = products.filter(filter);
+  const productCards = visible.length ? visible.map(product => {
+    const relevance = product.relevance?.status || 'needs_review';
+    const classification = product.local_classification || {};
+    const state = classification.status || 'not_classified';
+    const label = state === 'raw' ? 'Raw material' : state === 'derived' ? 'Derived product' : state === 'invalid' ? 'Invalid' : 'Not classified';
+    return `<article class="comparison-product-card ${state === 'raw' || state === 'derived' ? 'has-destination' : ''}">
+      ${product.image_url ? `<img src="${escapeHtml(product.image_url)}" alt="${escapeHtml(product.title)}" class="product-image" onerror="this.remove()">` : '<div class="product-image no-image">📦</div>'}
+      <div class="card-body"><div class="comparison-badges"><span class="comparison-badge open-source">Open source</span><span class="comparison-badge relevance ${escapeHtml(relevance)}">${escapeHtml(relevance.replaceAll('_', ' '))}</span><span class="comparison-badge local-classification ${escapeHtml(state)}">${escapeHtml(label)}</span></div>
+      <a href="${escapeHtml(product.url)}" target="_blank" rel="noopener" class="card-title">${escapeHtml(product.title)}</a>
+      <div class="card-price-row"><span class="card-price">${product.price != null ? `₹${Math.round(product.price)}` : '—'}</span>${product.rating ? `<span class="card-rating">${escapeHtml(product.rating)} ★</span>` : ''}</div>
+      <div class="card-meta"><span>${escapeHtml(product.seller || product.source || 'Unknown seller')}</span><span class="card-source">${escapeHtml(product.extraction_method || 'page extract')}</span></div>
+      ${product.relevance?.reason ? `<div class="relevance-reason">Relevance: ${escapeHtml(product.relevance.reason)}</div>` : ''}
+      ${classification.reason ? `<div class="relevance-reason">Local model: ${escapeHtml(classification.reason)}</div>` : ''}</div></article>`;
+  }).join('') : '<div class="empty-products">No products match this experiment filter.</div>';
+  return `<div class="comparison-results open-source-results">
+    <div class="comparison-heading"><div><h3>🌿 Open-Source Pipeline Experiment</h3><p>SearXNG open-web discovery → Crawl4AI product-page extraction → local Ollama classification. This is not Google Shopping data.</p></div><button class="match-toggle" onclick="returnToMarketActions(${data.mfp_id})">← Back to Market</button></div>
+    <div class="pipeline-comparison-grid"><section><h4>Current production baseline</h4>${productionReady ? `<strong>${production.products_matched || 0} matched products</strong><span>Serper + configured cloud LLM</span>` : '<strong>Not loaded</strong><span>Run “Fetch Live Market Data” first to populate this browser-only baseline.</span>'}</section><section><h4>Open-source experiment</h4><strong>${accepted} accepted products</strong><span>${escapeHtml(data.pipeline?.discovery || 'SearXNG')} + ${escapeHtml(data.pipeline?.crawler || 'Crawl4AI')} + ${escapeHtml(data.pipeline?.classifier || 'Ollama')}</span></section></div>
+    <div class="market-stats comparison-stats">
+      ${comparisonStat(summary.discovered_urls || 0, 'URLs discovered')}${comparisonStat(`${summary.crawl_completed || 0}/${(summary.crawl_completed || 0) + (summary.crawl_failed || 0)}`, 'Pages crawled')}${comparisonStat(summary.products_extracted || 0, 'Products extracted')}${comparisonStat(accepted, 'Raw / derived')}${comparisonStat(summary.rejected || 0, 'Rejected')}${comparisonStat(`${Math.round((summary.ollama?.latency_ms || 0) / 1000)}s`, 'Local LLM time')}
+    </div>
+    <div class="comparison-insight"><strong>Experiment boundary:</strong> ${escapeHtml(data.note || '')}${summary.ollama?.error ? `<br><strong>Ollama warning:</strong> ${escapeHtml(summary.ollama.error)}` : ''}</div>
+    <div class="filter-tabs comparison-filter-tabs open-source-filters">${openSourceFilterButton('accepted', `Accepted (${accepted})`, data.mfp_id)}${openSourceFilterButton('relevant', `Relevant (${summary.relevant || 0})`, data.mfp_id)}${openSourceFilterButton('rejected', `Rejected (${summary.rejected || 0})`, data.mfp_id)}${openSourceFilterButton('all', `All extracted (${products.length})`, data.mfp_id)}</div>
+    <div class="comparison-product-grid">${productCards}</div>
+    <div class="comparison-footer">Saved experiment: ${escapeHtml((data.comparison_file || '').split(/[\\/]/).pop() || 'session result')}</div>
+  </div>`;
+}
+
+function openSourceFilterButton(value, label, mfpId) { return `<button class="filter-tab ${openSourceFilter === value ? 'active' : ''}" onclick="setOpenSourceFilter('${value}', ${mfpId})">${label}</button>`; }
+function returnToMarketActions(mfpId) { const panel = document.getElementById('marketPanel'); if (panel) panel.innerHTML = marketCache[mfpId] ? renderMarketResults(marketCache[mfpId]) : renderMarketActions(mfpId, Boolean(categoryCache[mfpId])); }
+
 function renderMarketResults(data) {
   if (data.status === "no_results") {
-    return `<div class="error-box" style="border-color:var(--amber);color:var(--amber);background:var(--amber-bg);">
-      No e-commerce products found for this material. The item may not be widely sold online.
-    </div>`;
+    return `${renderComparisonLauncher(data.mfp_id, true)}${renderOpenSourceLauncher(data.mfp_id, true)}
+      <div class="error-box" style="border-color:var(--amber);color:var(--amber);background:var(--amber-bg);">
+        No e-commerce products found for this material. The item may not be widely sold online.
+      </div>`;
   }
 
   const s = data.market_summary || {};
@@ -390,6 +605,8 @@ function renderMarketResults(data) {
 
   let html = `
     <div class="market-results">
+      ${renderComparisonLauncher(data.mfp_id, true)}
+      ${renderOpenSourceLauncher(data.mfp_id, true)}
 
       <!-- Stats row -->
       <div class="market-stats">
@@ -848,13 +1065,7 @@ async function fetchCategories(mfpId, forceRefresh = false) {
     // Unlock the market section now that categories exist
     const marketPanel = document.getElementById("marketPanel");
     if (marketPanel && !marketCache[mfpId]) {
-      const catCount = (data.product_categories || []).length;
-      marketPanel.innerHTML = `<button class="market-trigger" onclick="fetchMarket(${mfpId})" id="marketBtn">
-           🔍 Fetch Live Market Data
-         </button>
-         <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
-           Will search for products across the ${catCount} categories generated above
-         </div>`;
+      marketPanel.innerHTML = renderMarketActions(mfpId, true);
     }
     const recommendationPanel = document.getElementById("recommendationPanel");
     if (recommendationPanel) recommendationPanel.innerHTML = renderRecommendationPanel(mfpId, getActiveMaterialStates());

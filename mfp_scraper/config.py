@@ -20,6 +20,18 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
+SCRAPINGDOG_API_KEY = os.getenv("SCRAPINGDOG_API_KEY", "")
+
+
+def _bool_from_env(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _nonnegative_int_from_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
 
 
 def _models_from_env(name: str, defaults: tuple[str, ...]) -> list[str]:
@@ -49,6 +61,7 @@ DEEP_ENRICHMENT_EVIDENCE_PATH = DATA_DIR / "deep_enrichment_evidence.json"
 MATERIAL_RELATIONSHIPS_PATH = DATA_DIR / "material_relationships.json"
 DEEP_RUNS_DIR = DATA_DIR / "deep_enrichment_runs"
 BACKUPS_DIR = DATA_DIR / "backups"
+OPEN_SOURCE_COMPARISONS_DIR = DATA_DIR / "open_source_comparisons"
 
 # Market Demand Module Output Paths
 MARKET_DEMAND_PATH = DATA_DIR / "market_demand_data.json"
@@ -79,6 +92,25 @@ TOGETHER_MODELS = _models_from_env("TOGETHER_MODELS", (
 ))
 
 LLM_PROVIDER_ORDER = _provider_order_from_env()
+MARKET_COMPARISON_MODE = _bool_from_env("MARKET_COMPARISON_MODE")
+MARKET_COMPARISON_STORE_RAW = _bool_from_env("MARKET_COMPARISON_STORE_RAW")
+MARKET_COMPARISON_RELEVANCE_FILTER = _bool_from_env("MARKET_COMPARISON_RELEVANCE_FILTER", True)
+MARKET_COMPARISON_DESTINATION_LIMIT = _nonnegative_int_from_env("MARKET_COMPARISON_DESTINATION_LIMIT", 5)
+MARKET_COMPARISON_DESTINATION_CANDIDATE_LIMIT = _nonnegative_int_from_env("MARKET_COMPARISON_DESTINATION_CANDIDATE_LIMIT", 15)
+MARKET_COMPARISON_DESTINATION_DYNAMIC = _bool_from_env("MARKET_COMPARISON_DESTINATION_DYNAMIC", True)
+
+# -- Isolated open-source market experiment ---------------------------------
+# This stack is intentionally separate from the Serper/Gemini production path.
+OPEN_SOURCE_MARKET_MODE = _bool_from_env("OPEN_SOURCE_MARKET_MODE")
+OPEN_SOURCE_DISCOVERY_PROVIDER = os.getenv("OPEN_SOURCE_DISCOVERY_PROVIDER", "searxng").strip().lower()
+SEARXNG_BASE_URL = os.getenv("SEARXNG_BASE_URL", "http://localhost:8080").rstrip("/")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b").strip()
+OPEN_SOURCE_RESULTS_PER_QUERY = _nonnegative_int_from_env("OPEN_SOURCE_RESULTS_PER_QUERY", 5)
+OPEN_SOURCE_MAX_URLS = _nonnegative_int_from_env("OPEN_SOURCE_MAX_URLS", 18)
+OPEN_SOURCE_MAX_CLASSIFICATIONS = _nonnegative_int_from_env("OPEN_SOURCE_MAX_CLASSIFICATIONS", 20)
+OPEN_SOURCE_CLASSIFICATION_BATCH_SIZE = _nonnegative_int_from_env("OPEN_SOURCE_CLASSIFICATION_BATCH_SIZE", 3)
+OPEN_SOURCE_REQUEST_TIMEOUT_SECONDS = _nonnegative_int_from_env("OPEN_SOURCE_REQUEST_TIMEOUT_SECONDS", 45)
 
 
 def configured_llm_providers() -> list[str]:
