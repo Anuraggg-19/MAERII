@@ -16,6 +16,7 @@ let activeMfpId = null;
 let marketCache = {};  // Cache market results per session
 let categoryCache = {};  // Cache product categories per session
 let recommendationCache = {};  // Session-only results keyed by constraints and market evidence
+let enhancementCache = {};  // Session-only enhancement results keyed by mfpId:productName
 let currentFilter = "all"; // "all" | "raw" | "derived"
 let currentSort = "confidence"; // default sort
 let showMatchedOnly = false; // false = show all scraped, true = LLM matched only
@@ -816,14 +817,43 @@ function renderRecommendationResults(data, fromCache) {
     const guide = (item.artisan_guide || []).map(step => '<li>' + escapeHtml(step) + '</li>').join('');
     const skills = (item.required_skills || []).map(s => '<span class="skill-chip">' + escapeHtml(s) + '</span>').join('');
     const skillsSection = skills ? '<div class="recommendation-skills"><div class="process-section-title">🛠 Required Skills</div><div class="skill-chips">' + skills + '</div></div>' : '';
-    return '<article class="recommendation-card">' +
-      '<div class="recommendation-card-header"><div><h3>' + escapeHtml(item.product_name) + '</h3><span>' + escapeHtml(item.category_name) + '</span></div><span class="diff-badge diff-' + String(item.difficulty || '').toLowerCase() + '">' + escapeHtml(item.difficulty) + '</span></div>' +
+
+    // Demand label (High / Medium / Low)
+    const demandLabel = item.demand_label || 'Medium';
+    const demandClass = demandLabel === 'High' ? 'demand-high' : demandLabel === 'Low' ? 'demand-low' : 'demand-medium';
+
+    // Product origin badge
+    const originLabel = item.product_origin || 'AI Recommendation';
+    const originClass = originLabel === 'Existing Product' ? 'origin-existing' : 'origin-ai';
+    const originIcon = originLabel === 'Existing Product' ? '📦' : '✨';
+
+    // Pricing unit badge & subtitle
+    const pricingUnit = item.pricing_unit || '';
+    const unitBadge = pricingUnit ? '<span class="pricing-unit-badge">⚖️ ' + escapeHtml(pricingUnit) + '</span>' : '';
+    const unitSubtitle = pricingUnit ? '<br><em class="metric-unit">(' + escapeHtml(pricingUnit) + ')</em>' : '';
+
+    return '<article class="recommendation-card clickable-rec" onclick="openEnhancementModal(' + data.mfp_id + ', ' + index + ')" data-rec-index="' + index + '">' +
+      '<div class="rec-click-hint"><span>✨ Click for Enhancement AI</span></div>' +
+      '<div class="recommendation-card-header"><div><h3>' + escapeHtml(item.product_name) + '</h3>' +
+      '<div class="rec-badge-row">' +
+        '<span class="product-origin-badge ' + originClass + '">' + originIcon + ' ' + escapeHtml(originLabel) + '</span>' +
+        unitBadge +
+      '</div>' +
+      '<span>' + escapeHtml(item.category_name) + '</span></div>' +
+      '<span class="diff-badge diff-' + String(item.difficulty || '').toLowerCase() + '">' + escapeHtml(item.difficulty) + '</span></div>' +
       '<p>' + escapeHtml(item.rationale) + '</p>' +
-      '<div class="recommendation-metrics"><div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost</span></div><div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price</span></div><div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div><div><strong>' + Number(item.demand_score).toFixed(0) + '/100</strong><span>Demand</span></div></div>' +
+      '<div class="recommendation-metrics">' +
+        '<div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost' + unitSubtitle + '</span></div>' +
+        '<div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price' + unitSubtitle + '</span></div>' +
+        '<div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div>' +
+        '<div><strong><span class="demand-badge ' + demandClass + '">' + escapeHtml(demandLabel) + '</span></strong><span>Demand</span></div>' +
+      '</div>' +
       skillsSection +
       '<div class="recommendation-tags"><span class="pot-badge pot-' + String(item.export_potential || '').toLowerCase() + '">' + escapeHtml(item.export_potential) + ' export</span><span>' + escapeHtml(item.target_customer_segment) + '</span></div>' +
-      '<button class="guide-toggle" type="button" onclick="document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
+      '<button class="guide-toggle" type="button" onclick="event.stopPropagation();document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
   }).join('');
+  // Store recommendations data on window for modal access
+  window._lastRecommendationData = data;
   return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>';
 }
 
@@ -978,3 +1008,423 @@ function getCategoryIcon(name) {
   if (n.includes('construction') || n.includes('material') || n.includes('bio')) return '🏗️';
   return '📦';
 }
+
+// ── Product Enhancement AI Modal ───────────────────────────────────────────
+
+function openEnhancementModal(mfpId, recIndex) {
+  const data = window._lastRecommendationData;
+  if (!data || !data.recommendations || !data.recommendations[recIndex]) return;
+
+  const recommendation = data.recommendations[recIndex];
+  const productName = recommendation.product_name;
+  const cacheKey = mfpId + ':' + productName;
+
+  // Create modal overlay
+  let overlay = document.getElementById('enhancementOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'enhancementOverlay';
+    overlay.className = 'enhancement-overlay';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  // Show loading
+  overlay.innerHTML = `
+    <div class="enhancement-modal">
+      <div class="enhancement-modal-header">
+        <div class="enhancement-title-area">
+          <span class="enhancement-ai-badge">✨ Product Enhancement AI</span>
+          <h2>${escapeHtml(productName)}</h2>
+          <span class="enhancement-subtitle">${escapeHtml(recommendation.category_name)} · ${escapeHtml(recommendation.difficulty)} difficulty · Expected: INR ${Number(recommendation.expected_selling_price_inr).toFixed(2)}${recommendation.pricing_unit ? ' (' + escapeHtml(recommendation.pricing_unit) + ')' : ''}</span>
+        </div>
+        <button class="enhancement-close" onclick="closeEnhancementModal()" title="Close (Esc)">✕</button>
+      </div>
+      <div class="enhancement-modal-body">
+        <div class="market-loading">
+          <div class="spinner"></div>
+          <p>Generating product enhancement plan...</p>
+          <div class="substep">Analyzing design, marketing, packaging & sales channels with AI</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Check cache
+  if (enhancementCache[cacheKey]) {
+    renderEnhancementContent(enhancementCache[cacheKey], recommendation, mfpId);
+    return;
+  }
+
+  // Fetch from API
+  fetchEnhancement(mfpId, recommendation, cacheKey);
+}
+
+async function fetchEnhancement(mfpId, recommendation, cacheKey) {
+  const market = marketCache[mfpId];
+  const marketContext = market ? recommendationEvidence(market) : {
+    market_summary: {}, competitor_analysis: {}, top_products: [],
+    product_demand_match: {}, regional_market_fit: [], seasonal_demand: {}
+  };
+
+  try {
+    const data = await api('/api/materials/' + mfpId + '/enhance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recommendation, market_context: marketContext })
+    });
+    enhancementCache[cacheKey] = data;
+    renderEnhancementContent(data, recommendation, mfpId);
+  } catch (error) {
+    const body = document.querySelector('.enhancement-modal-body');
+    if (body) {
+      body.innerHTML = '<div class="error-box" style="margin:20px;">Enhancement generation failed: ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+}
+
+function renderEnhancementContent(data, recommendation, mfpId) {
+  const body = document.querySelector('.enhancement-modal-body');
+  if (!body) return;
+
+  const e = data.enhancement || {};
+  const pd = e.product_design || {};
+  const ms = e.marketing_strategy || {};
+  const pkg = e.packaging || {};
+  const sc = e.sales_channels || {};
+
+  // Get targeted product examples from backend enhancement result
+  const relatedExamples = (data.related_examples && data.related_examples.length > 0)
+    ? data.related_examples
+    : [];
+
+  body.innerHTML = `
+    <div class="enhancement-tabs">
+      <button class="enh-tab active" onclick="switchEnhancementTab('design', this)">🎨 Design</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('marketing', this)">📢 Marketing</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('packaging', this)">📦 Packaging</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('sales', this)">🏪 Sales</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('examples', this)">📸 Examples${relatedExamples.length > 0 ? ' (' + relatedExamples.length + ')' : ''}</button>
+    </div>
+
+    <!-- Design Tab -->
+    <div class="enh-panel active" id="enh-design">
+      ${renderDesignTab(pd)}
+    </div>
+
+    <!-- Marketing Tab -->
+    <div class="enh-panel" id="enh-marketing">
+      ${renderMarketingTab(ms)}
+    </div>
+
+    <!-- Packaging Tab -->
+    <div class="enh-panel" id="enh-packaging">
+      ${renderPackagingTab(pkg)}
+    </div>
+
+    <!-- Sales Tab -->
+    <div class="enh-panel" id="enh-sales">
+      ${renderSalesTab(sc)}
+    </div>
+
+    <!-- Market Examples Tab -->
+    <div class="enh-panel" id="enh-examples">
+      ${renderMarketExamplesTab(relatedExamples, recommendation.product_name)}
+    </div>
+
+    <div class="enhancement-footer">
+      <span>Generated in ${data.elapsed_seconds || '?'}s · Provider: ${data.provider || 'unknown'}${data.fallback_used ? ' (fallback)' : ''}</span>
+    </div>
+  `;
+}
+
+function renderDesignTab(pd) {
+  const colors = (pd.color_palette || []).map(c =>
+    `<div class="color-swatch-card">
+      <div class="color-swatch" style="background:${c.hex || '#888'}"></div>
+      <div class="color-info">
+        <strong>${escapeHtml(c.name || 'Color')}</strong>
+        <span class="color-hex">${escapeHtml(c.hex || '')}</span>
+        <span class="color-usage">${escapeHtml(c.usage || '')}</span>
+      </div>
+    </div>`
+  ).join('');
+
+  const tips = (pd.modernization_tips || []).map(t =>
+    '<li>' + escapeHtml(t) + '</li>'
+  ).join('');
+
+  const principles = (pd.design_principles || []).map(p =>
+    '<li>' + escapeHtml(p) + '</li>'
+  ).join('');
+
+  return `
+    <div class="enh-section">
+      <h3>🎯 Design Inspiration</h3>
+      <div class="enh-inspiration-card">
+        <p>${escapeHtml(pd.inspiration || 'Modern design meets traditional craftsmanship')}</p>
+      </div>
+    </div>
+
+    <div class="enh-section">
+      <h3>📐 Form Factor</h3>
+      <p class="enh-description">${escapeHtml(pd.form_factor || '')}</p>
+    </div>
+
+    <div class="enh-section">
+      <h3>🎨 Recommended Color Palette</h3>
+      <div class="color-palette-grid">${colors}</div>
+    </div>
+
+    <div class="enh-two-col">
+      <div class="enh-section">
+        <h3>✨ Modernization Tips</h3>
+        <ul class="enh-tip-list">${tips}</ul>
+      </div>
+      <div class="enh-section">
+        <h3>📌 Design Principles</h3>
+        <ul class="enh-tip-list">${principles}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function renderMarketingTab(ms) {
+  const segments = (ms.target_segments || []).map(s =>
+    `<div class="segment-card">
+      <div class="segment-header">
+        <h4>${escapeHtml(s.segment || 'Segment')}</h4>
+      </div>
+      <p class="segment-desc">${escapeHtml(s.description || '')}</p>
+      <div class="segment-approach">
+        <span class="approach-label">📍 Approach:</span>
+        <span>${escapeHtml(s.approach || '')}</span>
+      </div>
+    </div>`
+  ).join('');
+
+  const digitalTactics = (ms.digital_marketing || []).map(t =>
+    '<li>' + escapeHtml(t) + '</li>'
+  ).join('');
+
+  return `
+    <div class="enh-section">
+      <h3>💡 Positioning & USP</h3>
+      <div class="enh-highlight-card">
+        <div class="highlight-row"><span class="highlight-label">Positioning</span><p>${escapeHtml(ms.positioning || '')}</p></div>
+        <div class="highlight-row"><span class="highlight-label">USP</span><p>${escapeHtml(ms.usp || '')}</p></div>
+        <div class="highlight-row"><span class="highlight-label">Pricing</span><p>${escapeHtml(ms.pricing_strategy || '')}</p></div>
+      </div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🎯 Target Customer Segments</h3>
+      <div class="segments-grid">${segments}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>📖 Storytelling Angle</h3>
+      <div class="enh-story-card">
+        <p>${escapeHtml(ms.storytelling_angle || '')}</p>
+      </div>
+    </div>
+
+    <div class="enh-section">
+      <h3>📱 Digital Marketing Tactics</h3>
+      <ul class="enh-tip-list">${digitalTactics}</ul>
+    </div>
+  `;
+}
+
+function renderPackagingTab(pkg) {
+  const colorScheme = (pkg.color_scheme || []).map(c =>
+    `<div class="color-swatch-card compact">
+      <div class="color-swatch" style="background:${c.hex || '#888'}"></div>
+      <div class="color-info">
+        <strong>${escapeHtml(c.name || 'Color')}</strong>
+        <span class="color-usage">${escapeHtml(c.usage || '')}</span>
+      </div>
+    </div>`
+  ).join('');
+
+  const labels = (pkg.label_elements || []).map(l =>
+    '<li>' + escapeHtml(l) + '</li>'
+  ).join('');
+
+  const certs = (pkg.certifications || []).map(c => {
+    const diffClass = (c.difficulty || '').toLowerCase() === 'easy' ? 'cert-easy'
+      : (c.difficulty || '').toLowerCase() === 'hard' ? 'cert-hard' : 'cert-medium';
+    return `<div class="cert-card">
+      <div class="cert-header">
+        <span class="cert-name">${escapeHtml(c.name || '')}</span>
+        <span class="cert-diff ${diffClass}">${escapeHtml(c.difficulty || 'Medium')}</span>
+      </div>
+      <p class="cert-why">${escapeHtml(c.why || '')}</p>
+    </div>`;
+  }).join('');
+
+  const sizes = (pkg.size_variants || []).map(s =>
+    `<div class="size-variant-card">
+      <div class="size-name">${escapeHtml(s.size || '')}</div>
+      <div class="size-price">${escapeHtml(s.price_range || '')}</div>
+      <div class="size-target">${escapeHtml(s.target || '')}</div>
+    </div>`
+  ).join('');
+
+  return `
+    <div class="enh-two-col">
+      <div class="enh-section">
+        <h3>📦 Packaging Material</h3>
+        <div class="enh-info-card">
+          <div class="info-row"><span class="info-label">Primary</span><span>${escapeHtml(pkg.material || '')}</span></div>
+          <div class="info-row"><span class="info-label">Secondary</span><span>${escapeHtml(pkg.secondary_packaging || '')}</span></div>
+        </div>
+      </div>
+      <div class="enh-section">
+        <h3>🎨 Packaging Colors</h3>
+        <div class="color-palette-grid compact">${colorScheme}</div>
+      </div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🏷️ Label Elements</h3>
+      <ul class="enh-checklist">${labels}</ul>
+    </div>
+
+    <div class="enh-section">
+      <h3>📜 Certifications Needed</h3>
+      <div class="certs-grid">${certs}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>📏 Size Variants</h3>
+      <div class="size-grid">${sizes}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🌱 Sustainability</h3>
+      <div class="enh-story-card green">
+        <p>${escapeHtml(pkg.sustainability_notes || '')}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderSalesTab(sc) {
+  const online = (sc.online || []).map(p => {
+    const diffClass = (p.setup_difficulty || '').toLowerCase() === 'easy' ? 'cert-easy'
+      : (p.setup_difficulty || '').toLowerCase() === 'hard' ? 'cert-hard' : 'cert-medium';
+    return `<div class="channel-card">
+      <div class="channel-header">
+        <h4>${escapeHtml(p.platform || '')}</h4>
+        <span class="cert-diff ${diffClass}">${escapeHtml(p.setup_difficulty || '')}</span>
+      </div>
+      <p>${escapeHtml(p.why || '')}</p>
+    </div>`;
+  }).join('');
+
+  const offline = (sc.offline || []).map(c =>
+    `<div class="channel-card">
+      <h4>${escapeHtml(c.channel || '')}</h4>
+      <p>${escapeHtml(c.description || '')}</p>
+    </div>`
+  ).join('');
+
+  const b2b = (sc.b2b || []).map(b =>
+    `<div class="channel-card">
+      <h4>${escapeHtml(b.buyer_type || '')}</h4>
+      <p>${escapeHtml(b.approach || '')}</p>
+    </div>`
+  ).join('');
+
+  const exportChannels = (sc.export || []).map(e => {
+    const potClass = (e.potential || '').toLowerCase() === 'high' ? 'pot-high'
+      : (e.potential || '').toLowerCase() === 'low' ? 'pot-low' : 'pot-medium';
+    return `<div class="channel-card">
+      <div class="channel-header">
+        <h4>${escapeHtml(e.market || '')}</h4>
+        <span class="pot-badge ${potClass}">${escapeHtml(e.potential || '')} potential</span>
+      </div>
+      <p>${escapeHtml(e.requirements || '')}</p>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="enh-section">
+      <h3>🛒 Online Platforms</h3>
+      <div class="channels-grid">${online}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🏬 Offline Channels</h3>
+      <div class="channels-grid">${offline}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🏢 B2B Opportunities</h3>
+      <div class="channels-grid">${b2b}</div>
+    </div>
+
+    <div class="enh-section">
+      <h3>🌍 Export Markets</h3>
+      <div class="channels-grid">${exportChannels}</div>
+    </div>
+  `;
+}
+
+function renderMarketExamplesTab(productsWithImages, productName = '') {
+  if (!productsWithImages || !productsWithImages.length) {
+    return `<div class="enh-empty-examples">
+      <span class="empty-icon">📸</span>
+      <p>No direct market examples found for "${escapeHtml(productName || 'this product')}".</p>
+      <div class="substep">This is an emerging product niche with minimal direct commercial competition — a high-opportunity craft product!</div>
+    </div>`;
+  }
+
+  const cards = productsWithImages.slice(0, 2).map(p =>
+    `<div class="example-card">
+      <img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.title || '')}" class="example-image" onerror="this.onerror=null;this.parentElement.style.display='none';">
+      <div class="example-info">
+        <div class="example-title">${escapeHtml(truncate(p.title || '', 55))}</div>
+        <div class="example-meta">
+          ${p.price ? '<span class="example-price">₹' + Math.round(p.price) + '</span>' : ''}
+          ${p.rating ? '<span class="example-rating">' + p.rating + ' ★</span>' : ''}
+          ${p.seller || p.source ? '<span class="example-source">' + escapeHtml(p.seller || p.source) + '</span>' : ''}
+        </div>
+      </div>
+    </div>`
+  ).join('');
+
+  return `
+    <div class="enh-section">
+      <h3>📸 Market Product Examples</h3>
+      <p class="enh-description">Targeted commercial products matching <strong>${escapeHtml(productName)}</strong> for packaging, design, and pricing inspiration.</p>
+      <div class="examples-grid">${cards}</div>
+    </div>
+  `;
+}
+
+function switchEnhancementTab(tabName, btnEl) {
+  document.querySelectorAll('.enh-tab').forEach(t => t.classList.remove('active'));
+  btnEl.classList.add('active');
+  document.querySelectorAll('.enh-panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('enh-' + tabName);
+  if (panel) panel.classList.add('active');
+}
+
+function closeEnhancementModal() {
+  const overlay = document.getElementById('enhancementOverlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+    setTimeout(() => { overlay.innerHTML = ''; }, 300);
+  }
+  document.body.style.overflow = '';
+}
+
+// Close on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeEnhancementModal();
+});
+

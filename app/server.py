@@ -22,7 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -34,6 +34,11 @@ from app.recommendation_service import (
     RecommendationGenerationError,
     RecommendationValidationError,
     generate_recommendations,
+)
+from app.enhancement_service import (
+    EnhancementGenerationError,
+    EnhancementValidationError,
+    generate_enhancement,
 )
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -62,6 +67,12 @@ class RecommendationRequest(BaseModel):
     production_time: str
     region_context: str
     cultural_motifs: Optional[str] = None
+    market_context: MarketContextRequest
+
+
+class EnhancementRequest(BaseModel):
+    """Request body for product enhancement generation."""
+    recommendation: dict = Field(...)
     market_context: MarketContextRequest
 
 
@@ -167,6 +178,25 @@ def api_recommend_products(mfp_id: int, request: RecommendationRequest):
         raise HTTPException(status_code=500, detail=f"Recommendation generation failed: {exc}")
 
 
+@app.post("/api/materials/{mfp_id}/enhance")
+def api_enhance_product(mfp_id: int, request: EnhancementRequest):
+    """Generate Product Enhancement AI guidance for a specific recommendation."""
+    try:
+        return generate_enhancement(
+            mfp_id=mfp_id,
+            recommendation=request.recommendation,
+            market_context=request.market_context.dict(),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except EnhancementValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except EnhancementGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Enhancement generation failed: {exc}")
+
+
 # ── Static Files (Frontend) ─────────────────────────────────────────────────
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -175,6 +205,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 @app.get("/")
 def serve_index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 # Mount static assets (CSS, JS)

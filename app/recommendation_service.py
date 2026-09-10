@@ -104,8 +104,9 @@ Return JSON only, with exactly 3 to 5 recommendations:
       "product_name": "...",
       "category_name": "...",
       "rationale": "Explain WHY this product is ideal for this artisan's specific skill level, budget, and timeline. Reference market evidence where possible.",
-      "unit_cost_inr": 120,
-      "expected_selling_price_inr": 240,
+      "pricing_unit": "per 100g bar",
+      "unit_cost_inr": 20,
+      "expected_selling_price_inr": 65,
       "demand_score": 74,
       "export_potential": "Medium",
       "difficulty": "Easy",
@@ -119,6 +120,9 @@ Return JSON only, with exactly 3 to 5 recommendations:
 Rules:
 - Use only Easy, Medium, or Hard for difficulty.
 - Use only Low, Medium, or High for export_potential.
+- pricing_unit must explicitly mention what the price applies to (e.g. "per 100g bar", "per litre", "per kg", "per piece", "per 50g jar", "per 250g pack").
+- unit_cost_inr must reflect realistic artisan production cost FOR THAT SPECIFIC UNIT (raw material + labor + tools).
+- expected_selling_price_inr must be a REALISTIC retail selling price FOR THAT SAME UNIT. It must reflect realistic artisan gross margins (typically 40% to 75% profit margin, meaning selling price is 1.6x to 3.5x unit cost). Never output industrial machine prices, bulk ton prices, or tens of thousands of rupees for individual consumer items like soaps, oils, or candles.
 - demand_score is a number from 0 to 100 reflecting REALISTIC, DIFFERENTIATED
   market demand for EACH specific product. Do NOT give similar scores to all
   products. Base each score on:
@@ -126,17 +130,6 @@ Rules:
   (b) The price range and review counts of those matched products
   (c) The market trend (growing/stable/declining) from the market summary
   (d) Seasonal relevance and regional fit
-  For example, a product with many matched listings and high reviews should
-  score 70-90; a niche product with few listings should score 30-55.
-- unit_cost_inr must reflect REALISTIC production economics:
-  (a) Raw material cost (proportional to the MFP MSP and quantity needed)
-  (b) Number of manufacturing steps (more steps = higher labour cost)
-  (c) Skill difficulty (advanced techniques cost more)
-  (d) Tools and equipment needed
-  Each product should have a genuinely DIFFERENT cost. Do NOT use round
-  numbers that are multiples of each other.
-- expected_selling_price_inr must be positive and greater than unit_cost_inr.
-  Base it on actual market prices from the evidence when available.
 - Include at least 3 concrete artisan-guide steps for every recommendation.
 - required_skills must list 2-5 specific artisan skills needed (e.g., "Wood carving", "Natural dyeing", "Resin processing").
 - Do not include a profit-margin field; it is calculated by the server.
@@ -231,6 +224,54 @@ def _label(value: Any, allowed: set[str], field_name: str) -> str:
     return normalized
 
 
+def _infer_pricing_unit(product_name: str, category_name: str = "") -> str:
+    """Infer an intuitive pricing unit (e.g., 'per 100g bar', 'per litre', 'per kg') from product name."""
+    name = (product_name + " " + category_name).lower()
+    if any(k in name for k in ["soap", "bathing bar"]):
+        return "per 100g bar"
+    if any(k in name for k in ["oil", "varnish", "liquid", "extract", "juice", "beverage", "biodiesel", "lubricant", "syrup", "tincture"]):
+        return "per litre"
+    if any(k in name for k in ["balm", "butter", "cream", "paste", "lotion", "ointment", "gel", "scrub"]):
+        return "per 50g jar"
+    if any(k in name for k in ["candle", "dia", "diya"]):
+        return "per candle"
+    if any(k in name for k in ["tea", "coffee", "infusion"]):
+        return "per 250g pack"
+    if any(k in name for k in ["powder", "cake", "feed", "flour", "grain", "seed", "resin", "lac", "shellac", "dye", "fertilizer", "manure", "compost", "briquette"]):
+        return "per kg"
+    if any(k in name for k in ["basket", "tray", "lamp", "plate", "box", "bangle", "toy", "craft", "mat", "pot", "bowl", "ornament", "artefact", "item"]):
+        return "per piece"
+    if any(k in name for k in ["fabric", "rope", "yarn", "thread", "textile"]):
+        return "per metre"
+    return "per unit"
+
+
+def _extract_pricing_unit(estimated_cost: str, product_name: str = "", category_name: str = "") -> str:
+    """Extract pricing unit from category estimated_cost string, or fall back to keyword inference."""
+    if estimated_cost:
+        m = re.search(r"\bper\s+([a-zA-Z0-9\s/().-]+)", estimated_cost, flags=re.IGNORECASE)
+        if m:
+            raw_unit = m.group(1).strip().rstrip(".,;").lower()
+            if "kilogram" in raw_unit or raw_unit == "kg":
+                return "per kg"
+            if "liter" in raw_unit or "litre" in raw_unit:
+                return "per litre"
+            if "item" in raw_unit or "piece" in raw_unit or "pc" in raw_unit:
+                if "soap" in product_name.lower():
+                    return "per 100g bar"
+                if "candle" in product_name.lower():
+                    return "per candle"
+                return "per piece"
+            if "100g bar" in raw_unit or "bar" in raw_unit:
+                return "per 100g bar"
+            if "50g jar" in raw_unit or "jar" in raw_unit:
+                return "per 50g jar"
+            if "candle" in raw_unit:
+                return "per candle"
+            return f"per {raw_unit}"
+    return _infer_pricing_unit(product_name, category_name)
+
+
 def validate_recommendations(result: Any) -> list[dict]:
     """Validate untrusted LLM output and calculate the margin on the server."""
     if not isinstance(result, dict) or not isinstance(result.get("recommendations"), list):
@@ -250,10 +291,19 @@ def validate_recommendations(result: Any) -> list[dict]:
         if not isinstance(guide, list) or len(guide) < 3 or any(not isinstance(step, str) or not step.strip() for step in guide):
             raise RecommendationValidationError("Each recommendation needs at least 3 non-empty artisan-guide steps")
 
+        pricing_unit = str(item.get("pricing_unit") or "").strip()
+        if not pricing_unit:
+            pricing_unit = _infer_pricing_unit(item.get("product_name", ""), item.get("category_name", ""))
+
         cost = _number(item.get("unit_cost_inr"), "unit_cost_inr")
         price = _number(item.get("expected_selling_price_inr"), "expected_selling_price_inr")
         if price <= cost:
             raise RecommendationValidationError("expected_selling_price_inr must be greater than unit_cost_inr")
+
+        # Sanity check: prevent unrealistic pricing hallucinations (> 5x cost or > 78% margin)
+        if price > cost * 5.0 or (price - cost) / price > 0.78:
+            price = round(cost * 2.7, 2)
+
         demand_score = _number(item.get("demand_score"), "demand_score")
         if demand_score > 100:
             raise RecommendationValidationError("demand_score must be between 0 and 100")
@@ -267,6 +317,7 @@ def validate_recommendations(result: Any) -> list[dict]:
             "product_name": item["product_name"].strip(),
             "category_name": item["category_name"].strip(),
             "rationale": item["rationale"].strip(),
+            "pricing_unit": pricing_unit,
             "unit_cost_inr": round(cost, 2),
             "expected_selling_price_inr": round(price, 2),
             "profit_margin_percent": round((price - cost) / price * 100, 2),
@@ -324,24 +375,31 @@ def _generate_validated_recommendations(llm: _LLMClient, prompt: str) -> list[di
             ) from retry_error
 
 
-def _fallback_unit_cost(product: dict, mfp_item: dict, difficulty: str) -> float:
-    """Derive a realistic unit cost from process complexity and material cost.
+def _fallback_unit_cost(
+    product: dict, mfp_item: dict, difficulty: str, product_name: str = ""
+) -> tuple[float, str]:
+    """Derive a realistic unit cost and pricing unit from process complexity and material cost.
 
     Uses multiple signals:
-      - estimated_cost from the category product (if the LLM provided it)
+      - estimated_cost from the category product (e.g. '₹15-25 per 100g bar')
       - MSP of the raw material as a base
       - Number of manufacturing steps (labour cost proxy)
       - Difficulty level (skill premium)
       - Number of required skills (complexity premium)
     """
-    # Try the LLM-provided estimated_cost first
+    name = product_name or str(product.get("name") or "")
+    category = str(product.get("category_name") or "")
     estimated_cost = str(product.get("estimated_cost") or "")
+    pricing_unit = _extract_pricing_unit(estimated_cost, name, category)
+
+    # Try the category-provided estimated_cost first
     values = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", estimated_cost)]
     if values:
         cost = sum(values[:2]) / min(len(values), 2)
-        if re.search(r"\bper\s+100\b", estimated_cost, flags=re.IGNORECASE):
+        # Only divide by 100 if explicitly stated for 100 items/pieces/units (not 100g or 100ml)
+        if re.search(r"\bper\s+100\s*(?:units?|pieces?|pcs?|items?)\b", estimated_cost, flags=re.IGNORECASE):
             cost /= 100
-        return round(max(cost, 20), 2)
+        return round(max(cost, 10.0), 2), pricing_unit
 
     # Build cost from components
     base_msp = mfp_item.get("msp")
@@ -350,23 +408,106 @@ def _fallback_unit_cost(product: dict, mfp_item: dict, difficulty: str) -> float
     except (TypeError, ValueError):
         base_msp = 50.0
 
-    # Raw material component: 1-2x MSP depending on how much material is needed
-    raw_material_cost = base_msp * 1.2
+    # Scale raw material component appropriately for smaller units
+    unit_lower = pricing_unit.lower()
+    if any(k in unit_lower for k in ["100g", "50g", "bar", "jar", "candle", "piece", "item"]):
+        raw_material_cost = base_msp * 0.25
+    elif any(k in unit_lower for k in ["litre", "liter", "kg", "kilogram"]):
+        raw_material_cost = base_msp * 1.1
+    else:
+        raw_material_cost = base_msp * 0.6
 
-    # Labour cost: based on number of manufacturing steps
     num_steps = len(product.get("manufacturing_process") or [])
-    labour_per_step = {"Easy": 15, "Medium": 25, "Hard": 40}.get(difficulty, 25)
-    labour_cost = num_steps * labour_per_step
+    labour_per_step = {"Easy": 8, "Medium": 16, "Hard": 28}.get(difficulty, 16)
+    labour_cost = max(num_steps, 2) * labour_per_step
 
-    # Skill premium: more required skills = higher overhead
     num_skills = len(product.get("required_skills") or [])
-    skill_premium = num_skills * 12
+    skill_premium = num_skills * 8
 
-    # Difficulty multiplier for tools/equipment amortization
-    equipment_cost = {"Easy": 10, "Medium": 35, "Hard": 75}.get(difficulty, 35)
+    equipment_cost = {"Easy": 6, "Medium": 18, "Hard": 40}.get(difficulty, 18)
 
     total = raw_material_cost + labour_cost + skill_premium + equipment_cost
-    return round(max(total, 30), 2)
+    return round(max(total, 15.0), 2), pricing_unit
+
+
+def _calculate_selling_price(
+    unit_cost: float,
+    product_name: str,
+    budget: str,
+    difficulty: str,
+    export_potential: str,
+    product_index: int,
+    market_context: dict,
+) -> float:
+    """Calculate a realistic, grounded retail selling price for the specific product and unit.
+
+    Never anchors to a global raw-material market average (which often contains expensive
+    industrial machinery or bulk tons).
+    Instead:
+      1. Checks for specific retail market listings for this specific product keyword.
+      2. Applies a grounded cost-plus artisan margin model (typically 42% - 72% margin):
+         - Low budget (local market): 44% - 52% margin
+         - Medium budget (craft/regional): 52% - 62% margin
+         - High budget (premium retail/export): 60% - 72% margin
+    """
+    top_products = market_context.get("top_products") or []
+    all_products = market_context.get("all_products") or []
+    candidate_products = top_products + all_products
+
+    # Extract clean keywords from product name (e.g. "soap", "oil", "candle", "cake", "balm")
+    stopwords = {"and", "for", "the", "with", "herbal", "organic", "natural", "pure", "seed", "extract", "products"}
+    keywords = [
+        w.lower() for w in re.findall(r"[A-Za-z]{3,}", product_name)
+        if w.lower() not in stopwords
+    ]
+
+    specific_retail_prices = []
+    for p in candidate_products:
+        title = (p.get("title") or "").lower()
+        try:
+            price = float(p.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        # Check if product title matches at least one specific keyword
+        if any(kw in title for kw in keywords):
+            # Retail price sanity check: retail items are between 1.2x and 4.5x unit_cost, and < 4000 INR
+            if 1.2 * unit_cost <= price <= max(unit_cost * 4.5, 3000):
+                specific_retail_prices.append(price)
+
+    if specific_retail_prices:
+        # Use median of specific retail prices
+        specific_retail_prices.sort()
+        mid = len(specific_retail_prices) // 2
+        median_price = (
+            specific_retail_prices[mid]
+            if len(specific_retail_prices) % 2 != 0
+            else (specific_retail_prices[mid - 1] + specific_retail_prices[mid]) / 2
+        )
+        variation = 0.94 + (product_index % 5) * 0.03
+        selling_price = round(median_price * variation, 2)
+        if selling_price >= unit_cost * 1.35:
+            return selling_price
+
+    # Grounded cost-plus margin model
+    base_margin = {"Low": 0.46, "Medium": 0.56, "High": 0.65}.get(budget, 0.56)
+
+    # Premium adjustments
+    if export_potential == "High":
+        base_margin += 0.05
+    elif export_potential == "Low":
+        base_margin -= 0.03
+
+    if difficulty == "Hard":
+        base_margin += 0.04
+    elif difficulty == "Easy":
+        base_margin -= 0.03
+
+    # Small per-product variation to prevent identical selling prices
+    variation = ((product_index * 3) % 7 - 3) * 0.015  # -0.045 to +0.045
+    margin = max(0.38, min(0.72, base_margin + variation))
+
+    selling_price = round(unit_cost / (1.0 - margin), 2)
+    return selling_price
 
 
 def _fallback_recommendations(
@@ -481,7 +622,7 @@ def _fallback_recommendations(
         potential = str(product.get("market_potential") or "Medium").strip().title()
         if potential not in EXPORT_POTENTIALS:
             potential = "Medium"
-        unit_cost = _fallback_unit_cost(product, mfp_item, difficulty)
+        unit_cost, pricing_unit = _fallback_unit_cost(product, mfp_item, difficulty, product_name)
         steps = [str(s).strip() for s in product.get("manufacturing_process") or [] if str(s).strip()]
 
         # Constraint filters (skipped for relaxed pass)
@@ -497,18 +638,9 @@ def _fallback_recommendations(
 
         local_demand = _compute_demand_score(product, potential, difficulty, steps)
 
-        # Selling price: use market avg as anchor when available, else margin-based
-        if matched_avg_price > 0 and matched_avg_price > unit_cost:
-            # Anchor to real market prices with some variation per product
-            price_factor = 0.7 + (product_index % 5) * 0.12  # 0.70 to 1.18
-            selling_price = round(matched_avg_price * price_factor, 2)
-            if selling_price <= unit_cost:
-                selling_price = round(unit_cost / margin_divisor, 2)
-        else:
-            # Margin-based with per-product variation
-            local_divisor = margin_divisor + ((product_index % 7) - 3) * 0.02
-            local_divisor = max(0.25, min(0.65, local_divisor))
-            selling_price = round(unit_cost / local_divisor, 2)
+        selling_price = _calculate_selling_price(
+            unit_cost, product_name, budget, difficulty, potential, product_index, market_context
+        )
         
         while len(steps) < 3:
             steps.append(
@@ -529,6 +661,7 @@ def _fallback_recommendations(
             "product_name": product_name,
             "category_name": category_name,
             "rationale": rationale,
+            "pricing_unit": pricing_unit,
             "unit_cost_inr": unit_cost,
             "expected_selling_price_inr": selling_price,
             "profit_margin_percent": round((selling_price - unit_cost) / selling_price * 100, 2),
@@ -580,18 +713,12 @@ def _fallback_recommendations(
             seen_products.add(product_name.casefold())
             difficulty = skill if skill in DIFFICULTIES else "Medium"
             dummy_product = {"manufacturing_process": [], "required_skills": []}
-            unit_cost = _fallback_unit_cost(dummy_product, mfp_item, difficulty)
+            unit_cost, pricing_unit = _fallback_unit_cost(dummy_product, mfp_item, difficulty, product_name=product_name)
             local_demand = _compute_demand_score(dummy_product, "Medium", difficulty, [])
 
-            if matched_avg_price > 0 and matched_avg_price > unit_cost:
-                price_factor = 0.7 + (product_index % 5) * 0.12
-                selling_price = round(matched_avg_price * price_factor, 2)
-                if selling_price <= unit_cost:
-                    selling_price = round(unit_cost / margin_divisor, 2)
-            else:
-                local_divisor = margin_divisor + ((product_index % 7) - 3) * 0.02
-                local_divisor = max(0.25, min(0.65, local_divisor))
-                selling_price = round(unit_cost / local_divisor, 2)
+            selling_price = _calculate_selling_price(
+                unit_cost, product_name, budget, difficulty, "Medium", product_index, market_context
+            )
 
             candidates.append({
                 "product_name": product_name,
@@ -601,6 +728,7 @@ def _fallback_recommendations(
                     f"that matches a {skill.lower()}-level artisan with a {budget.lower()} budget. "
                     "Aligned to the current live-market demand signal."
                 ),
+                "pricing_unit": pricing_unit,
                 "unit_cost_inr": unit_cost,
                 "expected_selling_price_inr": selling_price,
                 "profit_margin_percent": round((selling_price - unit_cost) / selling_price * 100, 2),
@@ -627,6 +755,160 @@ def _fallback_recommendations(
     for r in result:
         r.pop("_potential_rank", None)
     return result
+
+
+def _classify_demand_label(recommendations: list[dict]) -> None:
+    """Convert numeric demand_score to a High/Medium/Low label.
+
+    Strategy: rank all recommendations by demand_score, then assign labels
+    using relative positioning so there is genuine differentiation:
+      - Top ~30% -> High
+      - Middle ~40% -> Medium
+      - Bottom ~30% -> Low
+    For 3-5 recommendations, this guarantees not all get the same label.
+    Additional factors that push toward Low even if the score is decent:
+      - difficulty == Hard (limits consumer accessibility)
+      - export_potential == Low
+    """
+    if not recommendations:
+        return
+
+    # Sort indices by demand_score descending
+    scored = sorted(
+        enumerate(recommendations),
+        key=lambda pair: pair[1].get("demand_score", 0),
+        reverse=True,
+    )
+    n = len(scored)
+
+    for rank, (idx, rec) in enumerate(scored):
+        raw_score = rec.get("demand_score", 50)
+        difficulty = rec.get("difficulty", "Medium")
+        export = rec.get("export_potential", "Medium")
+
+        # Base label from rank position
+        if n <= 3:
+            # With 3 items: 1 High, 1 Medium, 1 Low
+            if rank == 0:
+                label = "High"
+            elif rank == n - 1:
+                label = "Low"
+            else:
+                label = "Medium"
+        else:
+            # With 4-5 items: top 1-2 High, middle Medium, bottom 1-2 Low
+            if rank == 0:
+                label = "High"
+            elif rank >= n - 1:
+                label = "Low"
+            elif raw_score >= 70:
+                label = "High"
+            elif raw_score < 45:
+                label = "Low"
+            else:
+                label = "Medium"
+
+        # Penalty: Hard difficulty products rarely have mass-market High demand
+        if label == "High" and difficulty == "Hard" and raw_score < 80:
+            label = "Medium"
+
+        # Penalty: Low export potential with mediocre score -> downgrade
+        if label == "Medium" and export == "Low" and raw_score < 55:
+            label = "Low"
+
+        # Ensure at least one is not High (prevent all-High)
+        recommendations[idx]["demand_label"] = label
+
+    # Final safety: guarantee at least 2 distinct labels
+    labels = [r["demand_label"] for r in recommendations]
+    if len(set(labels)) == 1 and len(labels) >= 2:
+        # All same label — force spread
+        lowest_idx = scored[-1][0]
+        highest_idx = scored[0][0]
+        if labels[0] == "High":
+            recommendations[lowest_idx]["demand_label"] = "Low"
+            if len(labels) >= 3:
+                mid_idx = scored[len(scored) // 2][0]
+                recommendations[mid_idx]["demand_label"] = "Medium"
+        elif labels[0] == "Low":
+            recommendations[highest_idx]["demand_label"] = "High"
+            if len(labels) >= 3:
+                mid_idx = scored[len(scored) // 2][0]
+                recommendations[mid_idx]["demand_label"] = "Medium"
+        else:  # all Medium
+            recommendations[highest_idx]["demand_label"] = "High"
+            recommendations[lowest_idx]["demand_label"] = "Low"
+    elif len(set(labels)) == 2 and len(labels) >= 4:
+        # Only 2 labels with 4+ items — try to add a third
+        label_counts = {}
+        for l in labels:
+            label_counts[l] = label_counts.get(l, 0) + 1
+        # If the majority label has 3+ items, downgrade/upgrade one
+        majority = max(label_counts, key=label_counts.get)
+        if label_counts[majority] >= 3:
+            if majority == "High":
+                # Downgrade the lowest-scoring "High" to "Medium"
+                for rank_idx in range(len(scored) - 1, -1, -1):
+                    idx = scored[rank_idx][0]
+                    if recommendations[idx]["demand_label"] == "High":
+                        recommendations[idx]["demand_label"] = "Medium"
+                        break
+            elif majority == "Low":
+                # Upgrade the highest-scoring "Low" to "Medium"
+                for rank_idx in range(len(scored)):
+                    idx = scored[rank_idx][0]
+                    if recommendations[idx]["demand_label"] == "Low":
+                        recommendations[idx]["demand_label"] = "Medium"
+                        break
+
+
+def _classify_product_origin(recommendations: list[dict], mfp_item: dict) -> None:
+    """Tag each recommendation as 'Existing Product' or 'AI Recommendation'.
+
+    Checks the recommendation product_name against the MFP item's
+    current_products and potential_products lists using fuzzy substring
+    matching (case-insensitive).
+    """
+    current = [str(p).lower().strip() for p in mfp_item.get("current_products") or []]
+    potential = [str(p).lower().strip() for p in mfp_item.get("potential_products") or []]
+    known_products = current + potential
+
+    for rec in recommendations:
+        rec_name = (rec.get("product_name") or "").lower().strip()
+        is_existing = False
+
+        for known in known_products:
+            # Normalize simple plurals: "soaps" -> "soap", "candles" -> "candle"
+            known_norm = known.rstrip("s") if known.endswith("s") and len(known) > 3 else known
+            rec_norm = rec_name.rstrip("s") if rec_name.endswith("s") and len(rec_name) > 3 else rec_name
+
+            # Fuzzy: check if the known product name appears inside the
+            # recommendation name, or vice versa.  For example:
+            #   known="candles", rec_name="mahua fat candles" -> match
+            #   known="soaps", rec_name="herbal mahua soap" -> match (via singular)
+            #   known="mahua seed oil", rec_name="cold-pressed mahua seed oil" -> match
+            if known in rec_name or rec_name in known:
+                is_existing = True
+                break
+            if known_norm in rec_norm or rec_norm in known_norm:
+                is_existing = True
+                break
+            # Also check individual significant words (>3 chars)
+            known_words = [w for w in known.split() if len(w) > 3]
+            rec_words = [w for w in rec_name.split() if len(w) > 3]
+            # Singularized word check
+            known_words_norm = [w.rstrip("s") if w.endswith("s") and len(w) > 4 else w for w in known_words]
+            rec_words_norm = [w.rstrip("s") if w.endswith("s") and len(w) > 4 else w for w in rec_words]
+            # If all significant words from the known product appear
+            # in the recommendation name, it's likely the same product
+            if known_words_norm and all(kw in rec_norm for kw in known_words_norm):
+                is_existing = True
+                break
+            if rec_words_norm and all(rw in known_norm for rw in rec_words_norm):
+                is_existing = True
+                break
+
+        rec["product_origin"] = "Existing Product" if is_existing else "AI Recommendation"
 
 
 def generate_recommendations(
@@ -680,6 +962,10 @@ def generate_recommendations(
         fallback_used = True
         provider_name = "deterministic"
         recommendations = _fallback_recommendations(mfp_item, categories, evidence, constraints)
+
+    # --- Post-processing: add demand label and product origin ---
+    _classify_demand_label(recommendations)
+    _classify_product_origin(recommendations, mfp_item)
 
     return {
         "status": "complete",
