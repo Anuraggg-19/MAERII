@@ -479,7 +479,7 @@ class MarketExtractor:
                 except Exception as exc:
                     error_str = str(exc)
                     if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
-                        if attempt >= config_market.LLM_MAX_RETRIES - 1:
+                        if "quota" in error_str.lower() or "perday" in error_str.lower() or attempt >= config_market.LLM_MAX_RETRIES - 1:
                             self.exhausted_models.add(model_name)
                             break
                         time.sleep(8)

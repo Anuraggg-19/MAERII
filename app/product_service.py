@@ -259,7 +259,7 @@ class _LLMClient:
                             {"role": "user", "content": prompt},
                         ],
                         temperature=0.2,
-                        max_tokens=4096,
+                        max_tokens=2500,
                         response_format={"type": "json_object"},
                     )
                     raw_text = response.choices[0].message.content.strip()
@@ -268,7 +268,13 @@ class _LLMClient:
                 except Exception as exc:
                     error_str = str(exc)
                     print(f"  [_call_groq] error: {error_str}")
+                    if "otpm" in error_str.lower() or "reduce max_tokens" in error_str.lower():
+                        _LLMClient._exhausted_models.add(model_name)
+                        break
                     if "429" in error_str or "rate limit" in error_str.lower():
+                        if "quota" in error_str.lower() or "limit" in error_str.lower():
+                            _LLMClient._exhausted_models.add(model_name)
+                            break
                         retry_match = re.search(r"Please try again in ([\d\.]+)s", error_str)
                         retry_secs = float(retry_match.group(1)) + 1 if retry_match else 10
                         time.sleep(retry_secs)
@@ -311,11 +317,8 @@ class _LLMClient:
                     error_str = str(exc)
                     print(f"  [_call_gemini] error: {error_str}")
                     if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
-                        if attempt >= 2:
-                            _LLMClient._exhausted_models.add(model_name)
-                            break
-                        time.sleep(8)
-                        continue
+                        _LLMClient._exhausted_models.add(model_name)
+                        break
                     if attempt >= 2:
                         break
                     time.sleep(3 * (attempt + 1))
@@ -343,6 +346,94 @@ class _LLMClient:
             return None
 
 
+def _fallback_product_categories(mfp_item: dict) -> list[dict]:
+    """Generate structured product categories deterministically from MFP knowledge data when LLMs fail."""
+    name = mfp_item.get("name", "Raw Material")
+    current = mfp_item.get("current_products") or []
+    potential = mfp_item.get("potential_products") or []
+    all_names = []
+    for p in current + potential:
+        cleaned = str(p).strip()
+        if cleaned and cleaned.lower() not in [x.lower() for x in all_names]:
+            all_names.append(cleaned)
+
+    if not all_names:
+        all_names = [f"Processed {name}", f"Handcrafted {name} Goods", f"{name} Commercial Extract"]
+
+    # Cluster into up to 3 logical categories based on keywords
+    cat_buckets: dict[str, list[dict]] = {
+        "Personal Care & Cosmetics": [],
+        "Commercial & Value-Added Products": [],
+        "Bio-Industrial & Agricultural Products": [],
+    }
+
+    for p_name in all_names:
+        p_lower = p_name.lower()
+        if any(w in p_lower for w in ["soap", "oil", "balm", "butter", "wax", "cosmetic", "shampoo", "cream", "honey"]):
+            category_key = "Personal Care & Cosmetics"
+            diff = "Medium"
+            unit = "per 100g bar" if "soap" in p_lower else ("per 50g jar" if any(b in p_lower for b in ["balm", "butter", "cream"]) else "per litre")
+            cost_range = f"₹25-45 {unit}" if "soap" in p_lower else f"₹80-140 {unit}"
+        elif any(w in p_lower for w in ["cake", "feed", "fertilizer", "pest", "biofuel", "biodiesel", "powder", "resin", "dye", "adhesive"]):
+            category_key = "Bio-Industrial & Agricultural Products"
+            diff = "Easy" if "pest" in p_lower or "fertilizer" in p_lower else "Hard"
+            unit = "per kg"
+            cost_range = "₹15-30 per kg" if "pest" in p_lower else "₹35-65 per kg"
+        else:
+            category_key = "Commercial & Value-Added Products"
+            diff = "Easy" if any(w in p_lower for w in ["candle", "powder", "pulp"]) else "Medium"
+            unit = "per candle" if "candle" in p_lower else "per piece"
+            cost_range = "₹20-40 per candle" if "candle" in p_lower else "₹40-80 per piece"
+
+        product_obj = {
+            "name": p_name,
+            "difficulty": diff,
+            "estimated_cost": cost_range,
+            "market_potential": "high" if diff != "Hard" else "medium",
+            "manufacturing_process": [
+                f"Harvest, inspect, and grade raw {name} for optimal processing quality.",
+                f"Clean, sort, and pretreat the raw material to remove foreign matter and impurities.",
+                f"Process using standard mechanical separation, extraction, or artisan shaping techniques.",
+                "Perform batch quality assurance, moisture verification, and finish checks.",
+                "Package in secure, eco-friendly retail-grade packaging with batch and date labelling.",
+            ],
+            "required_skills": [
+                "Raw material grading and quality inspection",
+                "Formulation, extraction, and batch process control",
+                "Safe handling, finishing, and hygienic packaging",
+            ],
+        }
+        cat_buckets[category_key].append(product_obj)
+
+    categories = []
+    for cat_name, products in cat_buckets.items():
+        if products:
+            categories.append({
+                "category_name": cat_name,
+                "products": products[:4],
+            })
+
+    if not categories:
+        categories.append({
+            "category_name": "Commercial Value-Added Products",
+            "products": [{
+                "name": f"Processed {name}",
+                "difficulty": "Medium",
+                "estimated_cost": "₹50-100 per kg",
+                "market_potential": "medium",
+                "manufacturing_process": [
+                    "Inspect and grade raw material",
+                    "Clean and sun-dry under shade",
+                    "Process and refine using local artisan tools",
+                    "Grade, inspect, and securely package",
+                ],
+                "required_skills": ["Sorting and grading", "Refining", "Packaging"],
+            }],
+        })
+
+    return categories
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
@@ -368,14 +459,15 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
 
     # 2. Check cache (unless refresh requested)
     if not refresh and mfp_id in _category_cache:
-        cached_data = _category_cache[mfp_id]
+        cached_entry = _category_cache[mfp_id]
+        elapsed = round(time.time() - start_time, 3)
         return {
             "status": "complete",
             "mfp_id": mfp_id,
             "mfp_name": mfp_item["name"],
-            "product_categories": cached_data.get("product_categories", []),
+            "product_categories": cached_entry["product_categories"],
             "cached": True,
-            "elapsed_seconds": round(time.time() - start_time, 2),
+            "elapsed_seconds": elapsed,
         }
 
     # 3. Build prompt from MFP context
@@ -399,30 +491,30 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
         artisan_types=", ".join(mfp_item.get("artisan_types", [])) or "General artisan",
     )
 
-    # 4. Call LLM
+    # 4. Call LLM (with Groq and Gemini support)
     llm = _LLMClient()
-    if not llm.provider:
-        return {
-            "status": "error",
-            "error": "No LLM provider available. Set GROQ_API_KEY or GEMINI_API_KEY in .env",
-        }
+    result = None
+    if llm.provider:
+        print(f"  [ProductService] Generating categories for MFP {mfp_id}: {mfp_item['name']} via {llm.provider}...")
+        result = llm.call(prompt)
 
-    print(f"  [ProductService] Generating categories for MFP {mfp_id}: {mfp_item['name']}...")
-    result = llm.call(prompt)
-
-    if not result or "product_categories" not in result:
-        return {
-            "status": "error",
-            "error": "LLM failed to generate valid product categories. Try again.",
-        }
-
-    categories = result["product_categories"]
+    fallback_used = False
+    provider_name = "none"
+    if not result or "product_categories" not in result or not isinstance(result.get("product_categories"), list) or not result["product_categories"]:
+        print(f"  [ProductService] LLM unavailable or invalid output, using grounded fallback categories for {mfp_item['name']}")
+        categories = _fallback_product_categories(mfp_item)
+        fallback_used = True
+        provider_name = "deterministic"
+    else:
+        categories = result["product_categories"]
+        provider_name = llm.provider
 
     # 5. Save to persistent cache
     _category_cache[mfp_id] = {
         "product_categories": categories,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "provider": llm.provider,
+        "provider": provider_name,
+        "fallback_used": fallback_used,
     }
     _save_cache()
 
@@ -436,4 +528,6 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
         "product_categories": categories,
         "cached": False,
         "elapsed_seconds": elapsed,
+        "provider": provider_name,
+        "fallback_used": fallback_used,
     }

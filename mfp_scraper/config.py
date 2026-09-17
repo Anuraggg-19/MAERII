@@ -69,9 +69,12 @@ SEARCH_RESULTS_PER_QUERY = 5  # Top N results to fetch per search
 # Flash models and supports the JSON output used by this project.
 GEMINI_MODELS = _models_from_env("GEMINI_MODELS", ("gemini-3.6-flash",))
 
-# Keep Groq opt-in: an API key with no configured model must not take over a
-# request and then fail before Gemini is tried.
-GROQ_MODELS = _models_from_env("GROQ_MODELS", ())
+GROQ_MODELS = _models_from_env("GROQ_MODELS", (
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "qwen/qwen3.6-27b",
+))
 
 TOGETHER_MODELS = _models_from_env("TOGETHER_MODELS", (
     "meta-llama/Llama-3.3-70B-Instruct-Turbo",
