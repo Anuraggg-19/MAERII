@@ -35,6 +35,8 @@ from app.recommendation_service import (
     RecommendationValidationError,
     generate_recommendations,
 )
+from app.intelligence_store import latest_payload
+from mfp_scraper.local_llm import LocalLLMClient
 from app.enhancement_service import (
     EnhancementGenerationError,
     EnhancementValidationError,
@@ -48,6 +50,12 @@ app = FastAPI(
     description="Raw Material Knowledge Engine — Demo API",
     version="0.1.0",
 )
+
+
+@app.get("/api/health/local-llm")
+def api_local_llm_health():
+    ready, message = LocalLLMClient().healthcheck()
+    return {"ready": ready, "message": message}
 
 
 class MarketContextRequest(BaseModel):
@@ -114,6 +122,16 @@ def api_get_graph(mfp_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Neo4j query failed: {e}")
+
+
+@app.get("/api/materials/{mfp_id}/intelligence/{task}")
+def api_latest_intelligence(mfp_id: int, task: str):
+    if task not in {"categories", "market", "recommendations", "marketing"}:
+        raise HTTPException(status_code=422, detail="Unknown intelligence task")
+    result = latest_payload(mfp_id, task)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No persisted result found")
+    return result
 
 
 @app.post("/api/materials/{mfp_id}/market")
