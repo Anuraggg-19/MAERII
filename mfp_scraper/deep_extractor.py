@@ -10,6 +10,7 @@ import time
 from typing import Optional
 
 from . import config
+from .local_llm import LocalLLMClient
 from .deep_models import (
     classify_source,
     dedupe_strings,
@@ -136,7 +137,9 @@ class DeepExtractor:
         """Choose an available remote provider if possible."""
         for provider in config.configured_llm_providers():
             try:
-                if provider == "gemini":
+                if provider == "local":
+                    self._clients[provider] = LocalLLMClient()
+                elif provider == "gemini":
                     from google import genai
 
                     self._clients[provider] = genai.Client(api_key=config.GEMINI_API_KEY)
@@ -178,14 +181,21 @@ class DeepExtractor:
         for provider in self._providers:
             self.provider = provider
             self.client = self._clients[provider]
-            result = (
-                self._extract_gemini(prompt, documents)
-                if provider == "gemini"
-                else self._extract_groq(prompt, documents)
-            )
+            if provider == "local":
+                result = self._extract_local(prompt, documents)
+            else:
+                result = self._extract_gemini(prompt, documents) if provider == "gemini" else self._extract_groq(prompt, documents)
             if result is not None:
                 return result
         return None
+
+    def _extract_local(self, prompt: str, documents: list[dict]) -> Optional[dict]:
+        data = self.client.call(
+            prompt,
+            system="You are a precise evidence-grounded MFP extraction assistant. Return valid JSON only.",
+            max_tokens=4096,
+        )
+        return self._normalize_result(data, documents) if data else None
 
     def _extract_groq(self, prompt: str, documents: list[dict]) -> Optional[dict]:
         """Run focused extraction via Groq."""
