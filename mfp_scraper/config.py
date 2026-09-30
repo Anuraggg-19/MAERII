@@ -22,6 +22,19 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 
 
+def _bool_from_env(name: str, default: bool = False) -> bool:
+    """Read a conventional boolean environment setting."""
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _nonnegative_int_from_env(name: str, default: int) -> int:
+    """Read a non-negative integer environment setting with a safe fallback."""
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
 def _models_from_env(name: str, defaults: tuple[str, ...]) -> list[str]:
     """Read a comma-separated model list without silently enabling a provider."""
     value = os.getenv(name, "").strip()
@@ -31,11 +44,11 @@ def _models_from_env(name: str, defaults: tuple[str, ...]) -> list[str]:
 
 
 def _provider_order_from_env() -> list[str]:
-    """Return a validated provider order, keeping Gemini as the primary LLM."""
-    configured = os.getenv("LLM_PROVIDER_ORDER", "gemini,groq")
-    valid = {"gemini", "groq"}
+    """Return configured providers; local is the production default."""
+    configured = os.getenv("LLM_PROVIDER_ORDER", "local")
+    valid = {"local", "gemini", "groq"}
     order = [provider.strip().lower() for provider in configured.split(",")]
-    return [provider for provider in order if provider in valid] or ["gemini", "groq"]
+    return [provider for provider in order if provider in valid] or ["local"]
 
 # ── File paths ──────────────────────────────────────────────────────────────
 CSV_PATH = PROJECT_ROOT / "MFP_List_87_Items_Split.csv"
@@ -64,6 +77,14 @@ SERPER_IMAGES_URL = "https://google.serper.dev/images"
 SEARCH_RESULTS_PER_QUERY = 5  # Top N results to fetch per search
 
 # -- LLM settings ------------------------------------------------------------
+# The primary production model is local GPT-OSS served by Ollama. Cloud
+# provider values remain for legacy/manual maintenance only.
+LOCAL_LLM_ENABLED = _bool_from_env("LOCAL_LLM_ENABLED", True)
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434").rstrip("/")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "gpt-oss:120b").strip()
+LOCAL_LLM_TIMEOUT_SECONDS = _nonnegative_int_from_env("LOCAL_LLM_TIMEOUT_SECONDS", 600)
+LOCAL_LLM_REASONING_EFFORT = os.getenv("LOCAL_LLM_REASONING_EFFORT", "medium").strip().lower()
+
 # Models to try in order (falls back if quota is exhausted).
 # Gemini 3.6 Flash is the current stable replacement for the retired Gemini 2.x
 # Flash models and supports the JSON output used by this project.
@@ -87,6 +108,7 @@ LLM_PROVIDER_ORDER = _provider_order_from_env()
 def configured_llm_providers() -> list[str]:
     """Return providers that have both credentials and at least one model."""
     ready = {
+        "local": bool(LOCAL_LLM_ENABLED and LOCAL_LLM_BASE_URL and LOCAL_LLM_MODEL),
         "gemini": bool(GEMINI_API_KEY and GEMINI_MODELS),
         "groq": bool(GROQ_API_KEY and GROQ_MODELS),
     }
