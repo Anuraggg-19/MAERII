@@ -15,7 +15,7 @@ from . import config
 from .seed_data import load_csv, load_seed_json, save_seed_json
 from .search_client import SerperClient, build_search_queries, build_image_query
 from .content_fetcher import aggregate_search_content
-from .llm_extractor import GeminiExtractor, GroqExtractor
+from .llm_extractor import GeminiExtractor, GroqExtractor, LocalExtractor
 from .validator import validate_dataset, print_validation_report, save_report
 
 
@@ -59,7 +59,9 @@ class EnrichmentPipeline:
 
     def __init__(self):
         self.search_client = SerperClient()
-        if "gemini" in config.configured_llm_providers():
+        if "local" in config.configured_llm_providers():
+            self.extractor = LocalExtractor()
+        elif "gemini" in config.configured_llm_providers():
             self.extractor = GeminiExtractor()
         elif "groq" in config.configured_llm_providers():
             self.extractor = GroqExtractor()
