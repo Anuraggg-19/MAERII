@@ -15,6 +15,7 @@ import time
 from typing import Any, Optional
 
 from app.product_service import _LLMClient, _find_mfp_item
+from app.intelligence_store import save_run
 
 
 # ── Prompt ──────────────────────────────────────────────────────────────────
@@ -213,7 +214,7 @@ def _fallback_enhancement(mfp_item: dict, recommendation: dict) -> dict:
     pricing_unit = str(recommendation.get("pricing_unit") or "").strip()
     unit_suffix = f" ({pricing_unit})" if pricing_unit else ""
 
-    return {
+    response = {
         "product_design": {
             "form_factor": f"A compact, well-finished {product_name.lower()} made from {material_name}, designed for retail shelves and online listings with clear product visibility.",
             "modernization_tips": [
@@ -404,6 +405,7 @@ def generate_enhancement(
     mfp_id: int,
     recommendation: dict,
     market_context: dict,
+    fetch_related_examples: bool = True,
 ) -> dict:
     """Generate comprehensive product enhancement guidance.
 
@@ -442,13 +444,11 @@ def generate_enhancement(
 
     # Find 1-2 product examples strictly related to this recommendation
     related_examples = _find_related_market_examples(
-        mfp_name=mfp_item.get("name", ""),
-        recommendation=recommendation,
-        market_context=market_context,
-        max_results=2,
-    )
+        mfp_name=mfp_item.get("name", ""), recommendation=recommendation,
+        market_context=market_context, max_results=2,
+    ) if fetch_related_examples else []
 
-    return {
+    response = {
         "status": "complete",
         "mfp_id": mfp_id,
         "mfp_name": mfp_item.get("name"),
@@ -459,4 +459,9 @@ def generate_enhancement(
         "provider": provider_name,
         "fallback_used": fallback_used,
     }
+    response["persistence_run_id"] = save_run(
+        mfp_id, "marketing", response, provider=provider_name,
+        metadata={"product_name": recommendation.get("product_name")},
+    )
+    return response
 
