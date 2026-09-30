@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.product_service import get_product_categories
+from app.intelligence_store import save_run
 from mfp_scraper.market_scraper.ecommerce_client import EcommerceClient
 from mfp_scraper.market_scraper.comparison_relevance import build_profile, label_products
 from mfp_scraper.market_scraper.market_extractor import MarketExtractor
@@ -246,7 +247,7 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         product_demand_match = llm_analysis.get("product_demand_match")
         regional_market_fit = llm_analysis.get("regional_market_fit")
 
-    return {
+    response = {
         "status": "complete",
         "mfp_id": mfp_id,
         "mfp_name": mfp_item["name"],
@@ -267,6 +268,11 @@ def analyze_market_realtime(mfp_id: int) -> dict:
         "elapsed_seconds": elapsed,
         "provider": extractor.describe_provider(),
     }
+    response["persistence_run_id"] = save_run(
+        mfp_id, "market", response, provider=extractor.describe_provider(),
+        metadata={"queries": queries, "products_scraped": products_scraped},
+    )
+    return response
 
 
 def _calculate_per_gram_price(product: dict) -> Optional[float]:
