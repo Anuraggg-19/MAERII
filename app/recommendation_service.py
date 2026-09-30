@@ -17,6 +17,7 @@ from app.product_service import (
     _find_mfp_item,
     get_cached_product_categories,
 )
+from app.intelligence_store import save_run
 
 
 SKILL_LEVELS = {"Beginner", "Intermediate", "Advanced"}
@@ -170,13 +171,14 @@ def validate_constraints(
     motifs = (cultural_motifs or "").strip()
     if len(motifs) > 280:
         raise RecommendationValidationError("cultural_motifs must be 280 characters or fewer")
-    return {
+    response = {
         "artisan_skill_level": artisan_skill_level,
         "budget_constraint": budget_constraint,
         "production_time": production_time,
         "region_context": region_context,
         "cultural_motifs": motifs or None,
     }
+    return response
 
 
 def validate_market_context(market_context: Any) -> dict:
@@ -967,7 +969,7 @@ def generate_recommendations(
     _classify_demand_label(recommendations)
     _classify_product_origin(recommendations, mfp_item)
 
-    return {
+    response = {
         "status": "complete",
         "mfp_id": mfp_id,
         "mfp_name": mfp_item.get("name"),
@@ -977,3 +979,8 @@ def generate_recommendations(
         "provider": provider_name,
         "fallback_used": fallback_used,
     }
+    response["persistence_run_id"] = save_run(
+        mfp_id, "recommendations", response, provider=provider_name,
+        metadata={"constraints": constraints},
+    )
+    return response
