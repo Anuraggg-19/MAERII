@@ -8,10 +8,15 @@ import time
 import re
 from typing import Optional
 
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:  # Local-only deployment does not require the Gemini SDK.
+    genai = None
+    types = None
 
 from . import config
+from .local_llm import LocalLLMClient
 
 
 # -- Extraction prompt template ----------------------------------------------
@@ -156,6 +161,8 @@ class GeminiExtractor:
                 "GEMINI_API_KEY not set. Add it to your .env file. "
                 "Get a free key at https://aistudio.google.com/apikey"
             )
+        if genai is None:
+            raise ValueError("google-genai is unavailable; configure the local provider")
         self.client = genai.Client(api_key=self.api_key)
         self._last_call_time = 0
         self.exhausted_models = set()
@@ -379,6 +386,38 @@ class GeminiExtractor:
             data["durability_analysis"]["factors"] = []
 
         return data
+
+
+class LocalExtractor(GeminiExtractor):
+    """GPT-OSS/Ollama implementation using the same output validators."""
+
+    def __init__(self):
+        self.client = LocalLLMClient()
+        self.api_key = None
+        self._last_call_time = 0
+        self.exhausted_models = set()
+
+    def extract(self, item: dict, source_text: str) -> Optional[dict]:
+        if not source_text or len(source_text.strip()) < 50:
+            return None
+        prompt = EXTRACTION_PROMPT.format(
+            item_name=item["name"], category=item.get("category", "Unknown"),
+            existing_scientific_name=item.get("scientific_name") or "Not available",
+            msp=item.get("msp") or "N/A", existing_states=", ".join(item.get("states", [])) or "Not specified",
+            source_text=source_text[:12000],
+        )
+        data = self.client.call(prompt, system="You are a precise MFP data extraction assistant. Return valid JSON only.", max_tokens=8192)
+        return self._validate_extraction(data) if data else None
+
+    def extract_material_scores(self, item: dict) -> Optional[dict]:
+        prompt = MATERIAL_SCORES_PROMPT.format(
+            item_name=item["name"], scientific_name=item.get("scientific_name") or "Unknown",
+            category=item.get("category", "Unknown"),
+            current_products=", ".join(item.get("current_products", [])[:8]) or "None listed",
+            description=item.get("description") or "No description available",
+        )
+        data = self.client.call(prompt, system="You are a precise MFP material-analysis assistant. Return valid JSON only.", max_tokens=8192)
+        return self._validate_scores(data) if data else None
 
 
 class GroqExtractor(GeminiExtractor):
