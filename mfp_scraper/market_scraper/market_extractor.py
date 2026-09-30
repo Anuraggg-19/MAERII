@@ -14,6 +14,7 @@ import time
 from typing import Optional
 
 from . import config_market
+from ..local_llm import LocalLLMClient
 from .market_models import (
     build_competitor_analysis,
     build_market_summary,
@@ -257,7 +258,9 @@ class MarketExtractor:
         """Choose an available LLM provider (Groq → Gemini fallback)."""
         for provider in config_market.config.configured_llm_providers():
             try:
-                if provider == "gemini":
+                if provider == "local":
+                    self._clients[provider] = LocalLLMClient()
+                elif provider == "gemini":
                     from google import genai
                     self._clients[provider] = genai.Client(api_key=config_market.GEMINI_API_KEY)
                 elif provider == "groq":
@@ -403,10 +406,21 @@ class MarketExtractor:
         for provider in self._providers:
             self.provider = provider
             self.client = self._clients[provider]
-            result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
+            if provider == "local":
+                result = self._call_local(prompt)
+            else:
+                result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
             if result is not None:
                 return result
         return None
+
+    def _call_local(self, prompt: str) -> Optional[dict]:
+        return self.client.call(
+            prompt,
+            system="You are a precise Indian MFP market analysis assistant. Return valid JSON only.",
+            temperature=config_market.LLM_TEMPERATURE,
+            max_tokens=4096,
+        )
 
     def _call_groq(self, prompt: str) -> Optional[dict]:
         """Call Groq for JSON-structured extraction."""
