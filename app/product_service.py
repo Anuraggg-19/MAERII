@@ -30,6 +30,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mfp_scraper import config as scraper_config
+from mfp_scraper.local_llm import LocalLLMClient
+from app.intelligence_store import latest_payload, save_run
 
 
 # ── Paths ───────────────────────────────────────────────────────────────────
@@ -168,6 +170,9 @@ def get_cached_product_categories(mfp_id: int) -> Optional[list[dict]]:
     prevents a direct recommendation request from silently generating new
     categories.
     """
+    persisted = latest_payload(mfp_id, "categories")
+    if persisted and isinstance(persisted.get("product_categories"), list):
+        return persisted["product_categories"]
     _load_cache()
     cached = _category_cache.get(mfp_id)
     if not cached:
@@ -203,7 +208,9 @@ class _LLMClient:
 
         for provider in scraper_config.configured_llm_providers():
             try:
-                if provider == "gemini":
+                if provider == "local":
+                    self._clients[provider] = LocalLLMClient()
+                elif provider == "gemini":
                     from google import genai
                     self._clients[provider] = genai.Client(api_key=gemini_key)
                 elif provider == "groq":
@@ -233,10 +240,21 @@ class _LLMClient:
         for provider in self._providers:
             self.provider = provider
             self.client = self._clients[provider]
-            result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
+            if provider == "local":
+                result = self._call_local(prompt)
+            else:
+                result = self._call_gemini(prompt) if provider == "gemini" else self._call_groq(prompt)
             if result is not None:
                 return result
         return None
+
+    def _call_local(self, prompt: str) -> Optional[dict]:
+        return self.client.call(
+            prompt,
+            system="You are a product categorization assistant for Indian tribal MFP. Return valid JSON only.",
+            temperature=0.2,
+            max_tokens=4096,
+        )
 
     def _call_groq(self, prompt: str) -> Optional[dict]:
         """Call Groq API for JSON output."""
@@ -446,7 +464,6 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
     Returns:
         A dict with status, mfp_id, mfp_name, product_categories, cached, elapsed_seconds.
     """
-    _load_cache()
     start_time = time.time()
 
     # 1. Find the MFP item
@@ -456,6 +473,17 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
             "status": "error",
             "error": f"MFP item with id {mfp_id} not found.",
         }
+
+    if not refresh:
+        persisted = latest_payload(mfp_id, "categories")
+        if persisted and isinstance(persisted.get("product_categories"), list):
+            return {
+                "status": "complete", "mfp_id": mfp_id, "mfp_name": mfp_item["name"],
+                "product_categories": persisted["product_categories"], "cached": True,
+                "persisted": True, "elapsed_seconds": round(time.time() - start_time, 3),
+            }
+
+    _load_cache()
 
     # 2. Check cache (unless refresh requested)
     if not refresh and mfp_id in _category_cache:
@@ -517,6 +545,10 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
         "fallback_used": fallback_used,
     }
     _save_cache()
+    run_id = save_run(
+        mfp_id, "categories", {"product_categories": categories}, provider=provider_name,
+        metadata=getattr(getattr(llm, "client", None), "last_metadata", {}),
+    )
 
     elapsed = round(time.time() - start_time, 2)
     print(f"  [ProductService] Generated {len(categories)} categories in {elapsed}s (cached to disk)")
@@ -530,4 +562,5 @@ def get_product_categories(mfp_id: int, refresh: bool = False) -> dict:
         "elapsed_seconds": elapsed,
         "provider": provider_name,
         "fallback_used": fallback_used,
+        "persistence_run_id": run_id,
     }
