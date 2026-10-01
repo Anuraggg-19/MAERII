@@ -17,7 +17,7 @@ from app.product_service import (
     _find_mfp_item,
     get_cached_product_categories,
 )
-from app.intelligence_store import save_run
+from app.intelligence_store import save_run, latest_payload
 
 
 SKILL_LEVELS = {"Beginner", "Intermediate", "Advanced"}
@@ -921,6 +921,7 @@ def generate_recommendations(
     region_context: str,
     cultural_motifs: Optional[str],
     market_context: Any,
+    refresh: bool = False,
 ) -> dict:
     """Generate constraint-aware recommendations via LLM, with deterministic fallback.
 
@@ -938,6 +939,21 @@ def generate_recommendations(
     mfp_item = _find_mfp_item(mfp_id)
     if not mfp_item:
         raise LookupError(f"MFP item with id {mfp_id} not found")
+
+    if not refresh:
+        # Only use cache if constraints match the ones used during backfill, or if we ignore them.
+        # It's safest to verify the constraints match the backfill defaults.
+        if (
+            artisan_skill_level == "Intermediate" and
+            budget_constraint == "Medium" and
+            production_time == "Moderate"
+        ):
+            persisted = latest_payload(mfp_id, "recommendations")
+            if persisted:
+                persisted["cached"] = True
+                persisted["persisted"] = True
+                persisted["elapsed_seconds"] = round(time.time() - start, 1)
+                return persisted
     constraints = validate_constraints(
         artisan_skill_level, budget_constraint, production_time,
         region_context, cultural_motifs, mfp_item,
