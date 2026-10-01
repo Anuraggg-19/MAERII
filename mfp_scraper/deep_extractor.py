@@ -193,7 +193,7 @@ class DeepExtractor:
         data = self.client.call(
             prompt,
             system="You are a precise evidence-grounded MFP extraction assistant. Return valid JSON only.",
-            max_tokens=4096,
+            max_tokens=8192,
         )
         return self._normalize_result(data, documents) if data else None
 
