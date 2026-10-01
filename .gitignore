@@ -25,3 +25,5 @@ __pycache__/
 # ── Project docs (not part of scraper engine) ──────────────
 maerii_deep_dive.md
 candidate_screening_architecture.md
+venv/
+.env.example
