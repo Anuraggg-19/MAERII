@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.product_service import get_product_categories
-from app.intelligence_store import save_run
+from app.intelligence_store import save_run, latest_payload
 from mfp_scraper.market_scraper.ecommerce_client import EcommerceClient
 from mfp_scraper.market_scraper.comparison_relevance import build_profile, label_products
 from mfp_scraper.market_scraper.market_extractor import MarketExtractor
@@ -57,7 +57,7 @@ def _find_mfp_item(mfp_id: int) -> Optional[dict]:
 
 # ── Real-time market analysis ────────────────────────────────────────────────
 
-def analyze_market_realtime(mfp_id: int) -> dict:
+def analyze_market_realtime(mfp_id: int, refresh: bool = False) -> dict:
     """Run real-time market analysis for a single MFP item.
 
     Steps:
@@ -77,6 +77,14 @@ def analyze_market_realtime(mfp_id: int) -> dict:
             "status": "error",
             "error": f"MFP item with id {mfp_id} not found in enriched dataset.",
         }
+
+    if not refresh:
+        persisted = latest_payload(mfp_id, "market")
+        if persisted:
+            persisted["cached"] = True
+            persisted["persisted"] = True
+            persisted["elapsed_seconds"] = round(time.time() - start_time, 1)
+            return persisted
 
     all_mfp_items = _load_mfp_items()
 
