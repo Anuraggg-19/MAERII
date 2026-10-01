@@ -14,7 +14,10 @@ import os
 from contextlib import contextmanager
 from typing import Optional
 
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
+
+load_dotenv()
 
 
 # ── Connection ───────────────────────────────────────────────────────────────
