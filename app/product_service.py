@@ -253,7 +253,7 @@ class _LLMClient:
             prompt,
             system="You are a product categorization assistant for Indian tribal MFP. Return valid JSON only.",
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=8192,
         )
 
     def _call_groq(self, prompt: str) -> Optional[dict]:
