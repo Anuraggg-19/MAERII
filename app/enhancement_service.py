@@ -15,7 +15,7 @@ import time
 from typing import Any, Optional
 
 from app.product_service import _LLMClient, _find_mfp_item
-from app.intelligence_store import save_run
+from app.intelligence_store import save_run, latest_payload
 
 
 # ── Prompt ──────────────────────────────────────────────────────────────────
@@ -406,6 +406,7 @@ def generate_enhancement(
     recommendation: dict,
     market_context: dict,
     fetch_related_examples: bool = True,
+    refresh: bool = False,
 ) -> dict:
     """Generate comprehensive product enhancement guidance.
 
@@ -420,6 +421,30 @@ def generate_enhancement(
 
     if not isinstance(recommendation, dict) or not recommendation.get("product_name"):
         raise EnhancementValidationError("A valid recommendation object with product_name is required")
+
+    if not refresh:
+        # For enhancements, there may be multiple runs (one per product).
+        # We need to find the one matching this product_name.
+        from app.neo4j_client import session
+        try:
+            with session() as database:
+                records = database.run(
+                    """
+                    MATCH (:Material {mfp_id: $mfp_id})-[:HAS_INTELLIGENCE_RUN]->(r:IntelligenceRun {task: 'marketing', status: 'complete'})
+                    RETURN r.payload_json AS payload_json, r.run_id AS run_id, r.provider AS provider, r.created_at AS created_at
+                    ORDER BY r.created_at DESC LIMIT 10
+                    """, mfp_id=mfp_id
+                )
+                for record in records:
+                    import json
+                    payload = json.loads(record["payload_json"])
+                    if payload.get("product_name") == recommendation["product_name"]:
+                        payload["cached"] = True
+                        payload["persisted"] = True
+                        payload["elapsed_seconds"] = round(time.time() - start, 1)
+                        return payload
+        except Exception as exc:
+            print(f"  [EnhancementService] Cache read skipped: {exc}")
 
     fallback_used = False
     provider_name = "none"
