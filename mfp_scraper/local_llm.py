@@ -33,7 +33,7 @@ class LocalLLMClient:
         *,
         system: str = "Return valid JSON only.",
         temperature: Optional[float] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> Optional[dict]:
         if not self.is_configured:
             return None
