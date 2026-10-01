@@ -12,7 +12,7 @@ ready, message = client.healthcheck()
 print(message)
 if not ready:
     raise SystemExit(1)
-result = client.call('{"health":"ok"}', system='Return exactly {"health":"ok"}.', max_tokens=32)
+result = client.call('{"health":"ok"}', system='Return exactly {"health":"ok"}.', max_tokens=512)
 if result != {"health": "ok"}:
     print("Model failed the JSON smoke test.")
     raise SystemExit(2)
