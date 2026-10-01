@@ -419,7 +419,7 @@ class MarketExtractor:
             prompt,
             system="You are a precise Indian MFP market analysis assistant. Return valid JSON only.",
             temperature=config_market.LLM_TEMPERATURE,
-            max_tokens=4096,
+            max_tokens=8192,
         )
 
     def _call_groq(self, prompt: str) -> Optional[dict]:
