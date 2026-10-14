@@ -20,6 +20,8 @@ let enhancementCache = {};  // Session-only enhancement results keyed by mfpId:p
 let currentFilter = "all"; // "all" | "raw" | "derived"
 let currentSort = "confidence"; // default sort
 let showMatchedOnly = false; // false = show all scraped, true = LLM matched only
+let activeCategoryFilter = 'all';
+let activeEquipFilter = 'all';
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 
@@ -80,6 +82,7 @@ async function loadMaterials() {
   try {
     const data = await api("/api/materials");
     allMaterials = data.materials;
+    renderCategoryPills();
     renderMaterialList(allMaterials);
     sidebarFooterEl.textContent = `${allMaterials.length} materials loaded`;
   } catch (e) {
@@ -89,12 +92,45 @@ async function loadMaterials() {
   }
 }
 
+function getMaterialCategoryIcon(category) {
+  if (!category) return '🌿';
+  const c = category.toLowerCase();
+  if (c.includes('gum') || c.includes('resin')) return '💧';
+  if (c.includes('seed') || c.includes('oil')) return '🌰';
+  if (c.includes('honey') || c.includes('wax')) return '🍯';
+  if (c.includes('leaf') || c.includes('leaves') || c.includes('herb')) return '🌿';
+  if (c.includes('bamboo') || c.includes('wood') || c.includes('cane')) return '🪵';
+  if (c.includes('flower')) return '🌸';
+  if (c.includes('fruit') || c.includes('berry')) return '🫐';
+  if (c.includes('bark') || c.includes('fiber')) return '🧶';
+  if (c.includes('mushroom') || c.includes('fungi')) return '🍄';
+  return '🌿';
+}
+
+function renderCategoryPills() {
+  const pillsContainer = document.getElementById('categoryPills');
+  if (!pillsContainer) return;
+  const categories = [...new Set(allMaterials.map(m => m.category).filter(Boolean))].sort();
+  let html = `<button class="category-pill ${activeCategoryFilter === 'all' ? 'active' : ''}" onclick="filterByCategory('all')">All <span class="pill-count">${allMaterials.length}</span></button>`;
+  categories.forEach(cat => {
+    const count = allMaterials.filter(m => m.category === cat).length;
+    html += `<button class="category-pill ${activeCategoryFilter === cat ? 'active' : ''}" onclick="filterByCategory('${escapeHtml(cat)}')">${getMaterialCategoryIcon(cat)} ${escapeHtml(cat)} <span class="pill-count">${count}</span></button>`;
+  });
+  pillsContainer.innerHTML = html;
+}
+
+function filterByCategory(cat) {
+  activeCategoryFilter = cat;
+  renderCategoryPills();
+  filterMaterials();
+}
+
 function renderMaterialList(materials) {
   materialListEl.innerHTML = materials.map(m => `
     <div class="material-item ${m.mfp_id === activeMfpId ? 'active' : ''}"
          data-id="${m.mfp_id}"
          onclick="selectMaterial(${m.mfp_id})">
-      <div class="mat-name">${m.name}</div>
+      <div class="mat-name"><span class="mat-icon">${getMaterialCategoryIcon(m.category)}</span> ${m.name}</div>
       <div class="mat-meta">MSP: ₹${m.msp || '—'}/${m.unit || 'kg'} · ${m.category || ''}</div>
     </div>
   `).join("");
@@ -102,15 +138,13 @@ function renderMaterialList(materials) {
 
 function filterMaterials() {
   const q = searchInputEl.value.toLowerCase().trim();
-  if (!q) {
-    renderMaterialList(allMaterials);
-    return;
-  }
-  const filtered = allMaterials.filter(m =>
-    m.name.toLowerCase().includes(q) ||
-    (m.scientific_name || "").toLowerCase().includes(q) ||
-    (m.category || "").toLowerCase().includes(q)
-  );
+  const filtered = allMaterials.filter(m => {
+    const matchSearch = !q || m.name.toLowerCase().includes(q) ||
+      (m.scientific_name || "").toLowerCase().includes(q) ||
+      (m.category || "").toLowerCase().includes(q);
+    const matchCategory = activeCategoryFilter === 'all' || m.category === activeCategoryFilter;
+    return matchSearch && matchCategory;
+  });
   renderMaterialList(filtered);
 }
 
@@ -144,10 +178,26 @@ function renderDetail(data) {
   const html = `
     <!-- Tab Navigation -->
     <div class="detail-tabs">
-      <button class="detail-tab active" onclick="switchTab('overview', this)">📋 Overview</button>
-      <button class="detail-tab" onclick="switchTab('categories', this)">🏭 Categories</button>
-      <button class="detail-tab" onclick="switchTab('market', this)">📊 Market</button>
-      <button class="detail-tab" onclick="switchTab('recommendations', this)">🎯 Recommendations</button>
+      <button class="detail-tab active" onclick="switchTab('overview', this)">
+        <span class="tab-icon">🌿</span>
+        <span class="tab-label">Overview</span>
+        <span class="tab-subtitle">Material Story & Value</span>
+      </button>
+      <button class="detail-tab" onclick="switchTab('categories', this)">
+        <span class="tab-icon">🏭</span>
+        <span class="tab-label">What to Make</span>
+        <span class="tab-subtitle">Products & Recipes</span>
+      </button>
+      <button class="detail-tab" onclick="switchTab('market', this)">
+        <span class="tab-icon">📊</span>
+        <span class="tab-label">Market Prices</span>
+        <span class="tab-subtitle">Real Online Demand</span>
+      </button>
+      <button class="detail-tab" onclick="switchTab('recommendations', this)">
+        <span class="tab-icon">🎯</span>
+        <span class="tab-label">Business Plan</span>
+        <span class="tab-subtitle">Your Earning Blueprint</span>
+      </button>
     </div>
 
     <!-- Tab 1: Overview -->
@@ -157,6 +207,48 @@ function renderDetail(data) {
         ${m.scientific_name ? `<div class="sci-name">${m.scientific_name}</div>` : ''}
         ${m.description ? `<div class="description">${m.description}</div>` : ''}
       </div>
+      <div class="at-a-glance-card">
+        <div class="at-a-glance-item">
+          <span class="at-a-glance-icon">🌿</span>
+          <div>
+            <div class="at-a-glance-label">What is it?</div>
+            <div class="at-a-glance-text">${m.description || m.name + ' — a Minor Forest Produce item collected by tribal communities.'}</div>
+          </div>
+        </div>
+        <div class="at-a-glance-item">
+          <span class="at-a-glance-icon">💰</span>
+          <div>
+            <div class="at-a-glance-label">Government Floor Price (MSP)</div>
+            <div class="at-a-glance-text">₹${m.msp || '—'} per ${m.unit || 'kg'} — This is the minimum the government guarantees to pay collectors.</div>
+          </div>
+        </div>
+        ${m.season ? `<div class="at-a-glance-item">
+          <span class="at-a-glance-icon">📅</span>
+          <div>
+            <div class="at-a-glance-label">Best Collection Season</div>
+            <div class="at-a-glance-text">${m.season}</div>
+          </div>
+        </div>` : ''}
+        ${g.current_products && g.current_products.length > 0 ? `<div class="at-a-glance-item">
+          <span class="at-a-glance-icon">🚀</span>
+          <div>
+            <div class="at-a-glance-label">Opportunity</div>
+            <div class="at-a-glance-text">This material can be processed into ${g.current_products.length + (g.potential_products ? g.potential_products.length : 0)} different products for higher earnings.</div>
+          </div>
+        </div>` : ''}
+      </div>
+      ${m.msp ? `<div class="value-multiplier-banner">
+        <div class="vm-stage">
+          <div class="vm-label">Collector MSP</div>
+          <div class="vm-price msp">₹${m.msp}/${m.unit || 'kg'}</div>
+        </div>
+        <div class="vm-arrow">→</div>
+        <div class="vm-stage">
+          <div class="vm-label">Potential Value After Processing</div>
+          <div class="vm-price market">₹${Math.round(m.msp * 8)}–${Math.round(m.msp * 15)}/${m.unit || 'kg'}</div>
+        </div>
+        <div class="vm-multiplier">🚀 8–15x Value</div>
+      </div>` : ''}
       <div class="info-chips">
         <div class="chip highlight">
           <span class="chip-label">MSP</span>
@@ -185,9 +277,14 @@ function renderDetail(data) {
         <div id="categoryPanel">
           ${categoryCache[m.mfp_id]
             ? renderCategoryResults(categoryCache[m.mfp_id])
-            : `<button class="market-trigger" onclick="fetchCategories(${m.mfp_id})" id="categoryBtn">
-                 🔬 Generate Product Categories & Processes
-               </button>`
+            : `<div class="journey-prompt">
+                 <span class="journey-prompt-icon">✨</span>
+                 <div class="journey-prompt-title">Discover What Products You Can Make</div>
+                 <div class="journey-prompt-desc">Our AI will analyze this raw material and show you all the products you can create from it, with step-by-step instructions.</div>
+                 <button class="market-trigger" onclick="fetchCategories(${m.mfp_id})" id="categoryBtn" style="margin-top:16px">
+                   ✨ Show Me What I Can Make
+                 </button>
+               </div>`
           }
         </div>
       </div>
@@ -205,12 +302,12 @@ function renderDetail(data) {
                      🔍 Fetch Live Market Data
                    </button>
                    <div class="substep" style="margin-top:8px;text-align:center;font-size:12px;color:var(--text-muted);">
-                     Will search for products across the generated categories above
+                     Will search for real online product prices across the ${(categoryCache[m.mfp_id].product_categories || []).length} product types discovered
                    </div>`)
-            : `<div class="market-locked">
-                 <span class="lock-icon">🔒</span>
-                 <p>Generate Product Categories first to unlock market analysis.</p>
-                 <div class="substep">Market scraping uses the generated categories to search for relevant products across each category.</div>
+            : `<div class="journey-prompt">
+                 <span class="journey-prompt-icon">🏭</span>
+                 <div class="journey-prompt-title">First, Explore What You Can Make</div>
+                 <div class="journey-prompt-desc">Go to the "What to Make" tab to discover all the products this material can become. Once done, you'll unlock real-time market prices here.</div>
                </div>`
           }
         </div>
@@ -298,26 +395,36 @@ function renderMaterialScores(m) {
 
   // Material Properties chips
   if (hasProperties) {
-    const props = [
-      { label: 'Strength', value: m.strength },
-      { label: 'Flexibility', value: m.flexibility },
-      { label: 'Texture', value: m.texture },
-      { label: 'Water Resist.', value: m.water_resistance },
-      { label: 'Biodegradable', value: m.biodegradability },
-      { label: 'Workability', value: m.workability },
-    ].filter(p => p.value);
-
-    html += `
-      <div class="score-card wide">
-        <div class="score-header">⚙ Material Properties</div>
-        <div class="property-chips">
-          ${props.map(p => `<div class="property-chip">
-            <span class="prop-label">${p.label}</span>
-            <span class="prop-value prop-${p.value}">${p.value}</span>
-          </div>`).join('')}
-        </div>
-      </div>
-    `;
+    const propertyDescriptions = {
+      strength: { icon: '💪', title: 'Strength', descriptions: { high: 'Very strong — ideal for durable items like furniture and tools', medium: 'Moderate strength — good for baskets, trays, and home decor', low: 'Lightweight — best for decorative and packaging items' }},
+      flexibility: { icon: '🤸', title: 'Flexibility', descriptions: { high: 'Very flexible — easy to bend and weave into shapes', medium: 'Somewhat flexible — can be shaped with gentle effort', low: 'Rigid — holds its shape well, good for structural items' }},
+      texture: { icon: '✋', title: 'Texture', descriptions: { smooth: 'Smooth finish — naturally pleasing to touch', rough: 'Textured surface — gives a rustic, handmade feel', medium: 'Medium texture — versatile for many product types' }},
+      water_resistance: { icon: '💧', title: 'Water Resistant', descriptions: { high: 'Yes — can handle moisture and outdoor use', medium: 'Partial — needs some protection from water', low: 'No — must keep dry, store indoors' }},
+      biodegradability: { icon: '🌱', title: 'Eco-Friendly', descriptions: { high: '100% biodegradable & compostable', medium: 'Mostly eco-friendly with minimal processing', low: 'May need some chemical treatment' }},
+      workability: { icon: '🛠️', title: 'Ease of Crafting', descriptions: { high: 'Very easy — can be shaped with basic hand tools at home', easy: 'Very easy — can be shaped with basic hand tools at home', medium: 'Moderate — needs some practice and basic workshop tools', moderate: 'Moderate — needs some practice and basic workshop tools', low: 'Skilled — requires training and specialized equipment', difficult: 'Skilled — requires training and specialized equipment' }}
+    };
+    
+    const propList = ['strength', 'flexibility', 'texture', 'water_resistance', 'biodegradability', 'workability']
+      .filter(key => m[key])
+      .map(key => {
+        const info = propertyDescriptions[key];
+        const val = m[key].toLowerCase();
+        const desc = (info.descriptions[val] || m[key]);
+        return `<div class="human-prop">
+          <span class="human-prop-icon">${info.icon}</span>
+          <div class="human-prop-content">
+            <div class="human-prop-title">${info.title}</div>
+            <div class="human-prop-desc">${desc}</div>
+          </div>
+        </div>`;
+      });
+    
+    if (propList.length > 0) {
+      html += `<div class="score-card wide">
+        <div class="score-header">⚙ What This Material Is Like</div>
+        <div class="human-props-grid">${propList.join('')}</div>
+      </div>`;
+    }
   }
 
   html += '</div>';
@@ -348,9 +455,9 @@ async function fetchMarket(mfpId) {
   panel.innerHTML = `
     <div class="market-loading">
       <div class="spinner"></div>
-      <p>Analyzing live market data...</p>
-      <div class="substep">Searching e-commerce platforms via Serper API, then classifying with LLM</div>
-      <div class="substep" style="margin-top:8px;">This typically takes 20–40 seconds</div>
+      <p>Finding product prices from online stores...</p>
+      <div class="substep">Scanning Amazon, Flipkart, and other stores for real prices</div>
+      <div class="substep" style="margin-top:8px;">This usually takes about 30 seconds — please wait</div>
     </div>
   `;
 
@@ -391,6 +498,25 @@ function renderMarketResults(data) {
 
   let html = `
     <div class="market-results">
+
+      <!-- Market Temp -->
+      ${(() => {
+        const tempLevel = demandScore >= 0.65 ? 'hot' : demandScore >= 0.35 ? 'warm' : 'cool';
+        const tempEmoji = tempLevel === 'hot' ? '🔥' : tempLevel === 'warm' ? '🌤️' : '❄️';
+        const tempText = tempLevel === 'hot' ? 'High Demand!' : tempLevel === 'warm' ? 'Moderate Demand' : 'Low Demand';
+        const tempDesc = tempLevel === 'hot' 
+          ? 'Customers are actively searching for and buying this online. Great opportunity!'
+          : tempLevel === 'warm'
+          ? 'Steady interest online. Good potential with the right product and pricing.'
+          : 'Limited online demand currently. Consider niche positioning or local markets.';
+        return `<div class="market-temp-card">
+          <div class="temp-meter ${tempLevel}">${tempEmoji}</div>
+          <div class="temp-info">
+            <div class="temp-status ${tempLevel}">${tempText}</div>
+            <div class="temp-desc">${tempDesc}</div>
+          </div>
+        </div>`;
+      })()}
 
       <!-- Stats row -->
       <div class="market-stats">
@@ -438,7 +564,7 @@ function renderMarketResults(data) {
   // Top brands
   if (c.top_brands && c.top_brands.length > 0) {
     html += `<div class="section-card">
-      <h3>🏷 Top Sellers</h3>
+      <h3>🏷 Who's Selling This Online</h3>
       <div class="tag-list">${c.top_brands.map(b => `<span class="tag">${b}</span>`).join("")}</div>
       ${c.price_positioning ? `<div style="margin-top:10px;font-size:12px;color:var(--text-muted);">Positioning: <strong style="color:var(--text-secondary)">${c.price_positioning}</strong></div>` : ''}
     </div>`;
@@ -447,7 +573,7 @@ function renderMarketResults(data) {
   // Market gaps
   if (c.market_gaps && c.market_gaps.length > 0) {
     html += `<div class="section-card">
-      <h3>🎯 Market Gaps</h3>
+      <h3>💡 What Buyers Are Looking For</h3>
       <ul class="insight-list">${c.market_gaps.map(g => `<li>${g}</li>`).join("")}</ul>
     </div>`;
   }
@@ -455,7 +581,7 @@ function renderMarketResults(data) {
   // LLM Insights
   if (c.llm_insights && c.llm_insights.length > 0) {
     html += `<div class="section-card">
-      <h3>💡 Opportunities</h3>
+      <h3>🌟 Why People Are Buying This</h3>
       <ul class="insight-list">${c.llm_insights.map(i => `<li>${i}</li>`).join("")}</ul>
     </div>`;
   }
@@ -463,7 +589,7 @@ function renderMarketResults(data) {
   // Demand drivers
   if (c.demand_drivers && c.demand_drivers.length > 0) {
     html += `<div class="section-card">
-      <h3>📈 Demand Drivers</h3>
+      <h3>📈 What's Driving Demand</h3>
       <ul class="insight-list">${c.demand_drivers.map(d => `<li>${d}</li>`).join("")}</ul>
     </div>`;
   }
@@ -471,7 +597,7 @@ function renderMarketResults(data) {
   // Top attributes
   if (s.top_attributes && s.top_attributes.length > 0) {
     html += `<div class="section-card">
-      <h3>🏅 Top Attributes</h3>
+      <h3>⭐ What Customers Value Most</h3>
       <div class="tag-list">${s.top_attributes.map(a =>
         `<span class="tag product">${a}</span>`
       ).join("")}</div>
@@ -482,7 +608,7 @@ function renderMarketResults(data) {
   if (data.seasonal_demand) {
     const sd = data.seasonal_demand;
     html += `<div class="section-card">
-      <h3>📅 Seasonal Demand</h3>
+      <h3>📅 When Do People Buy This?</h3>
       ${sd.peak_seasons && sd.peak_seasons.length > 0 ? `<div class="tag-list">${sd.peak_seasons.map(s => `<span class="tag season">${s}</span>`).join('')}</div>` : ''}
       ${sd.seasonal_pattern ? `<p class="insight-text">${sd.seasonal_pattern}</p>` : ''}
       ${sd.off_season_strategy ? `<p class="insight-text muted">💡 Off-season: ${sd.off_season_strategy}</p>` : ''}
@@ -493,7 +619,7 @@ function renderMarketResults(data) {
   if (data.product_demand_match) {
     const pdm = data.product_demand_match;
     html += `<div class="section-card">
-      <h3>✅ Product-Demand Match</h3>
+      <h3>✅ How Well Do Current Products Match Demand?</h3>
       ${pdm.demand_alignment_score != null ? `<div class="demand-bar-container" style="margin-bottom:12px;">
         <div class="demand-label"><span>Alignment</span><span style="font-weight:700">${(pdm.demand_alignment_score * 100).toFixed(0)}%</span></div>
         <div class="demand-bar"><div class="demand-fill" style="width:${pdm.demand_alignment_score * 100}%;background:var(--accent)"></div></div>
@@ -506,7 +632,7 @@ function renderMarketResults(data) {
   // Regional Market Fit
   if (data.regional_market_fit && data.regional_market_fit.length > 0) {
     html += `<div class="section-card">
-      <h3>🌍 Regional Market Fit</h3>
+      <h3>🌍 Where Does This Sell Best?</h3>
       <div class="regional-grid">
         ${data.regional_market_fit.map(r => `
           <div class="regional-item">
@@ -532,8 +658,7 @@ function renderMarketResults(data) {
   // Elapsed time
   html += `
       <div style="margin-top:16px;font-size:11px;color:var(--text-muted);text-align:right;">
-        Analysis completed in ${data.elapsed_seconds || '?'}s · Provider: ${data.provider || 'unknown'}
-        · ${data.products_found || 0} scraped, ${data.products_matched || 0} matched
+        Market scan completed in ${data.elapsed_seconds || '?'} seconds · Found ${data.products_found || 0} products, ${data.products_matched || 0} direct matches
       </div>
     </div>
   `;
@@ -548,14 +673,14 @@ function renderProductCards(products, data, totalScraped, totalMatched) {
   const derivedCount = products.filter(p => p.product_type === "derived").length;
 
   const toggleLabel = showMatchedOnly
-    ? `Show All Scraped (${totalScraped})`
-    : `Show LLM Matched Only (${totalMatched})`;
+    ? `Show All Products (${totalScraped})`
+    : `Show Best Matches Only (${totalMatched})`;
   const toggleClass = showMatchedOnly ? '' : 'active';
 
   let html = `
     <div class="product-section" style="margin-top:16px;">
       <div class="product-header-row">
-        <h3>🛒 Market Products</h3>
+        <h3>🛒 Products Available Online</h3>
         <button class="match-toggle ${toggleClass}" onclick="toggleMatchedView(${data.mfp_id})" id="matchToggleBtn">
           ${toggleLabel}
         </button>
@@ -642,8 +767,8 @@ function renderFilteredProducts(products) {
       : `<div class="product-image no-image">📦</div>`;
 
     const matchedBadge = p.is_matched
-      ? '<span class="match-badge matched">✓ Matched</span>'
-      : '<span class="match-badge unmatched">Unmatched</span>';
+      ? '<span class="match-badge matched friendly-badge direct">🌟 Direct Match</span>'
+      : '<span class="match-badge unmatched friendly-badge related">💡 Related</span>';
 
     return `
       <div class="product-card ${p.is_matched ? '' : 'unmatched-card'}">
@@ -756,20 +881,139 @@ function truncate(str, len) {
 
 function renderRecommendationPanel(mfpId, states) {
   if (!categoryCache[mfpId] || !marketCache[mfpId] || marketCache[mfpId].status !== 'complete') {
-    const message = !categoryCache[mfpId]
-      ? 'Generate Product Categories first to unlock recommendations.'
-      : 'Fetch live market data first to unlock recommendations.';
-    return '<div class="market-locked"><span class="lock-icon">Locked</span><p>' + message + '</p><div class="substep">Recommendations combine the generated processes with the current market analysis.</div></div>';
+    const isNoCat = !categoryCache[mfpId];
+    const stepName = isNoCat ? 'What to Make' : 'Market Prices';
+    const icon = isNoCat ? '🏭' : '📊';
+    return `<div class="journey-prompt">
+      <span class="journey-prompt-icon">${icon}</span>
+      <div class="journey-prompt-title">Complete the "${stepName}" Step First</div>
+      <div class="journey-prompt-desc">${isNoCat 
+        ? 'Discover what products you can make from this material, then get market data, and finally receive your custom business plan.'
+        : 'Fetch live market data first so recommendations can include real pricing and demand information.'}</div>
+    </div>`;
   }
+  
   const uniqueStates = [...new Set(states)].sort();
-  return '<form class="recommendation-form" onsubmit="submitRecommendations(event, ' + mfpId + ')">' +
-    '<div class="recommendation-controls">' +
-      '<label>Skill level<select name="artisan_skill_level"><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>' +
-      '<label>Budget<select name="budget_constraint"><option>Low</option><option>Medium</option><option>High</option></select></label>' +
-      '<label>Production time<select name="production_time"><option>Quick turnaround</option><option>Moderate</option><option>Long-term</option></select></label>' +
-      '<label>Region<select name="region_context"><option>All listed regions</option>' + uniqueStates.map(state => '<option>' + escapeHtml(state) + '</option>').join('') + '</select></label>' +
-    '</div><label class="motif-field">Cultural motifs (optional)<input name="cultural_motifs" maxlength="280" placeholder="e.g., Gond patterns, local storytelling"></label>' +
-    '<button class="market-trigger" type="submit">Generate recommendations</button></form><div id="recommendationResults"></div>';
+  
+  return `
+    <form class="wizard-form" onsubmit="submitRecommendations(event, ${mfpId})">
+      <div class="wizard-step-group">
+        <div class="wizard-step-title">
+          <span class="wizard-step-number">1</span>
+          Who is making the product?
+        </div>
+        <div class="wizard-card-options">
+          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
+            <input type="radio" name="artisan_skill_level" value="Beginner" checked style="display:none">
+            <span class="wizard-card-icon">👩‍🌾</span>
+            <span class="wizard-card-text">Beginner</span>
+            <span class="wizard-card-desc">New to crafting, SHG member</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="artisan_skill_level" value="Intermediate" style="display:none">
+            <span class="wizard-card-icon">👨‍🎨</span>
+            <span class="wizard-card-text">Intermediate</span>
+            <span class="wizard-card-desc">Some experience, basic tools</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="artisan_skill_level" value="Advanced" style="display:none">
+            <span class="wizard-card-icon">🏆</span>
+            <span class="wizard-card-text">Advanced</span>
+            <span class="wizard-card-desc">Master artisan or enterprise</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="wizard-step-group">
+        <div class="wizard-step-title">
+          <span class="wizard-step-number">2</span>
+          What is your starting budget?
+        </div>
+        <div class="wizard-card-options">
+          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
+            <input type="radio" name="budget_constraint" value="Low" checked style="display:none">
+            <span class="wizard-card-icon">🌱</span>
+            <span class="wizard-card-text">Low Budget</span>
+            <span class="wizard-card-desc">Under ₹5,000</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="budget_constraint" value="Medium" style="display:none">
+            <span class="wizard-card-icon">🌿</span>
+            <span class="wizard-card-text">Medium</span>
+            <span class="wizard-card-desc">₹5,000 – ₹25,000</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="budget_constraint" value="High" style="display:none">
+            <span class="wizard-card-icon">🌳</span>
+            <span class="wizard-card-text">Commercial</span>
+            <span class="wizard-card-desc">Over ₹25,000</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="wizard-step-group">
+        <div class="wizard-step-title">
+          <span class="wizard-step-number">3</span>
+          How quickly do you need results?
+        </div>
+        <div class="wizard-card-options">
+          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
+            <input type="radio" name="production_time" value="Quick turnaround" checked style="display:none">
+            <span class="wizard-card-icon">⚡</span>
+            <span class="wizard-card-text">Quick</span>
+            <span class="wizard-card-desc">Start earning in days</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="production_time" value="Moderate" style="display:none">
+            <span class="wizard-card-icon">📅</span>
+            <span class="wizard-card-text">Moderate</span>
+            <span class="wizard-card-desc">A few weeks to setup</span>
+          </label>
+          <label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="production_time" value="Long-term" style="display:none">
+            <span class="wizard-card-icon">🏗️</span>
+            <span class="wizard-card-text">Long-term</span>
+            <span class="wizard-card-desc">Invest for bigger returns</span>
+          </label>
+        </div>
+      </div>
+
+      ${uniqueStates.length > 0 ? `<div class="wizard-step-group">
+        <div class="wizard-step-title">
+          <span class="wizard-step-number">4</span>
+          Which region are you in?
+        </div>
+        <div class="wizard-card-options">
+          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
+            <input type="radio" name="region_context" value="All listed regions" checked style="display:none">
+            <span class="wizard-card-icon">🗺️</span>
+            <span class="wizard-card-text">All Regions</span>
+          </label>
+          ${uniqueStates.map(state => `<label class="wizard-card-option" onclick="selectWizardOption(this)">
+            <input type="radio" name="region_context" value="${escapeHtml(state)}" style="display:none">
+            <span class="wizard-card-icon">📍</span>
+            <span class="wizard-card-text">${escapeHtml(state)}</span>
+          </label>`).join('')}
+        </div>
+      </div>` : '<input type="hidden" name="region_context" value="All listed regions">'}
+
+      <label class="motif-field">
+        <span style="font-size:14px;font-weight:600;color:var(--text-secondary)">Cultural motifs (optional)</span>
+        <input name="cultural_motifs" maxlength="280" placeholder="e.g., Gond patterns, Warli art, local tribal designs">
+      </label>
+
+      <button class="blueprint-cta-btn" type="submit">
+        🎯 Generate My Business Plan
+      </button>
+    </form>
+    <div id="recommendationResults"></div>`;
+}
+
+function selectWizardOption(label) {
+  const group = label.closest('.wizard-card-options');
+  group.querySelectorAll('.wizard-card-option').forEach(opt => opt.classList.remove('selected'));
+  label.classList.add('selected');
+  label.querySelector('input').checked = true;
 }
 
 async function submitRecommendations(event, mfpId) {
@@ -793,7 +1037,7 @@ async function submitRecommendations(event, mfpId) {
   }
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
-  results.innerHTML = '<div class="market-loading"><div class="spinner"></div><p>Generating product recommendations...</p></div>';
+  results.innerHTML = '<div class="market-loading"><div class="spinner"></div><p>Creating your custom business plan...</p></div>';
   try {
     const data = await api('/api/materials/' + mfpId + '/recommend', {
       method: 'POST',
@@ -823,9 +1067,9 @@ function renderRecommendationResults(data, fromCache) {
     const demandClass = demandLabel === 'High' ? 'demand-high' : demandLabel === 'Low' ? 'demand-low' : 'demand-medium';
 
     // Product origin badge
-    const originLabel = item.product_origin || 'AI Recommendation';
-    const originClass = originLabel === 'Existing Product' ? 'origin-existing' : 'origin-ai';
-    const originIcon = originLabel === 'Existing Product' ? '📦' : '✨';
+    const originLabel = item.product_origin === 'Existing Product' ? 'Existing Product' : '✨ New Product Idea';
+    const originClass = item.product_origin === 'Existing Product' ? 'origin-existing' : 'origin-ai';
+    const originIcon = item.product_origin === 'Existing Product' ? '📦' : '✨';
 
     // Pricing unit badge & subtitle
     const pricingUnit = item.pricing_unit || '';
@@ -833,7 +1077,7 @@ function renderRecommendationResults(data, fromCache) {
     const unitSubtitle = pricingUnit ? '<br><em class="metric-unit">(' + escapeHtml(pricingUnit) + ')</em>' : '';
 
     return '<article class="recommendation-card clickable-rec" onclick="openEnhancementModal(' + data.mfp_id + ', ' + index + ')" data-rec-index="' + index + '">' +
-      '<div class="rec-click-hint"><span>✨ Click for Enhancement AI</span></div>' +
+      '<div class="rec-click-hint"><span>✨ Open Full Business Blueprint</span></div>' +
       '<div class="recommendation-card-header"><div><h3>' + escapeHtml(item.product_name) + '</h3>' +
       '<div class="rec-badge-row">' +
         '<span class="product-origin-badge ' + originClass + '">' + originIcon + ' ' + escapeHtml(originLabel) + '</span>' +
@@ -843,18 +1087,116 @@ function renderRecommendationResults(data, fromCache) {
       '<span class="diff-badge diff-' + String(item.difficulty || '').toLowerCase() + '">' + escapeHtml(item.difficulty) + '</span></div>' +
       '<p>' + escapeHtml(item.rationale) + '</p>' +
       '<div class="recommendation-metrics">' +
-        '<div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Unit cost' + unitSubtitle + '</span></div>' +
-        '<div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Expected price' + unitSubtitle + '</span></div>' +
-        '<div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Margin</span></div>' +
-        '<div><strong><span class="demand-badge ' + demandClass + '">' + escapeHtml(demandLabel) + '</span></strong><span>Demand</span></div>' +
+        '<div><strong>INR ' + Number(item.unit_cost_inr).toFixed(2) + '</strong><span>Making Cost' + unitSubtitle + '</span></div>' +
+        '<div><strong>INR ' + Number(item.expected_selling_price_inr).toFixed(2) + '</strong><span>Selling Price' + unitSubtitle + '</span></div>' +
+        '<div><strong>' + Number(item.profit_margin_percent).toFixed(1) + '%</strong><span>Your Profit %</span></div>' +
+        '<div><strong><span class="demand-badge ' + demandClass + '">' + escapeHtml(demandLabel) + '</span></strong><span>Buyer Demand</span></div>' +
       '</div>' +
       skillsSection +
       '<div class="recommendation-tags"><span class="pot-badge pot-' + String(item.export_potential || '').toLowerCase() + '">' + escapeHtml(item.export_potential) + ' export</span><span>' + escapeHtml(item.target_customer_segment) + '</span></div>' +
-      '<button class="guide-toggle" type="button" onclick="event.stopPropagation();document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button><ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">' +
+        '<button class="calc-income-btn" type="button" onclick="event.stopPropagation();selectProductForCalc(' + index + ')">📊 Calculate Monthly Income</button>' +
+        '<button class="guide-toggle" type="button" style="margin-top:0" onclick="event.stopPropagation();document.getElementById(\'' + guideId + '\').classList.toggle(\'hidden\')">Artisan guide</button>' +
+      '</div>' +
+      '<ol class="artisan-guide hidden" id="' + guideId + '">' + guide + '</ol></article>';
   }).join('');
-  // Store recommendations data on window for modal access
+  
+  // Store recommendations data on window for modal & calculator access
   window._lastRecommendationData = data;
-  return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>';
+  
+  const firstRec = recommendations[0];
+  const optionsHtml = recommendations.map((item, idx) => `
+    <option value="${idx}">📦 ${escapeHtml(item.product_name)} (Cost: ₹${Math.round(item.unit_cost_inr)} | Price: ₹${Math.round(item.expected_selling_price_inr)})</option>
+  `).join('');
+
+  const profitCalcHtml = `
+    <div class="profit-calc-section" id="profitCalcSection">
+      <div class="profit-calc-header">
+        <div class="profit-calc-title">💰 Monthly Income Calculator</div>
+        <div class="profit-select-box">
+          <span class="profit-select-label">Product:</span>
+          <select class="profit-product-select" id="profitProductSelect" onchange="updateProfitCalc()">
+            ${optionsHtml}
+          </select>
+        </div>
+      </div>
+      <div class="profit-selected-banner" id="profitSelectedBanner">
+        ${renderProfitBanner(firstRec)}
+      </div>
+      <div class="profit-slider-row">
+        <span class="profit-slider-label">If you produce & sell this many units per month:</span>
+        <input type="range" class="profit-slider" id="profitSlider" min="10" max="500" value="50" step="10" oninput="updateProfitCalc()">
+        <span class="profit-unit-count" id="profitUnitCount">50</span>
+      </div>
+      <div class="profit-result-grid" id="profitResultGrid">
+        ${renderProfitResults(firstRec, 50)}
+      </div>
+    </div>
+  `;
+  
+  return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>' + profitCalcHtml;
+}
+
+function renderProfitBanner(rec) {
+  if (!rec) return '';
+  const unitCost = Math.round(rec.unit_cost_inr || 0);
+  const sellingPrice = Math.round(rec.expected_selling_price_inr || 0);
+  const profitPerUnit = sellingPrice - unitCost;
+  const unitSuffix = rec.pricing_unit ? ` (${rec.pricing_unit})` : '';
+  return `<span>Calculating for: <strong>📦 ${escapeHtml(rec.product_name)}</strong></span>` +
+    `<span>Making Cost: <strong>₹${unitCost}${unitSuffix}</strong></span>` +
+    `<span>Selling Price: <strong>₹${sellingPrice}${unitSuffix}</strong></span>` +
+    `<span>Profit per Unit: <strong style="color:var(--green)">+₹${profitPerUnit}</strong></span>`;
+}
+
+function selectProductForCalc(index) {
+  const selectEl = document.getElementById('profitProductSelect');
+  if (selectEl) {
+    selectEl.value = index;
+    updateProfitCalc();
+  }
+  const section = document.getElementById('profitCalcSection');
+  if (section) {
+    section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function renderProfitResults(rec, units) {
+  const cost = (rec.unit_cost_inr || 0) * units;
+  const revenue = (rec.expected_selling_price_inr || 0) * units;
+  const profit = revenue - cost;
+  return `
+    <div class="profit-result-item">
+      <div class="profit-result-label">Monthly Cost</div>
+      <div class="profit-result-value cost">₹${Math.round(cost).toLocaleString('en-IN')}</div>
+    </div>
+    <div class="profit-result-item">
+      <div class="profit-result-label">Monthly Revenue</div>
+      <div class="profit-result-value revenue">₹${Math.round(revenue).toLocaleString('en-IN')}</div>
+    </div>
+    <div class="profit-result-item highlight">
+      <div class="profit-result-label">Monthly Net Profit 🎉</div>
+      <div class="profit-result-value profit">₹${Math.round(profit).toLocaleString('en-IN')}</div>
+    </div>
+  `;
+}
+
+function updateProfitCalc() {
+  const slider = document.getElementById('profitSlider');
+  const countEl = document.getElementById('profitUnitCount');
+  const gridEl = document.getElementById('profitResultGrid');
+  const selectEl = document.getElementById('profitProductSelect');
+  const bannerEl = document.getElementById('profitSelectedBanner');
+  if (!slider || !countEl || !gridEl) return;
+  const units = parseInt(slider.value);
+  countEl.textContent = units;
+  const data = window._lastRecommendationData;
+  const idx = selectEl ? (parseInt(selectEl.value) || 0) : 0;
+  if (data && data.recommendations && data.recommendations[idx]) {
+    const rec = data.recommendations[idx];
+    gridEl.innerHTML = renderProfitResults(rec, units);
+    if (bannerEl) bannerEl.innerHTML = renderProfitBanner(rec);
+  }
 }
 
 async function fetchCategories(mfpId, forceRefresh = false) {
@@ -863,8 +1205,8 @@ async function fetchCategories(mfpId, forceRefresh = false) {
   panel.innerHTML = `
     <div class="market-loading">
       <div class="spinner"></div>
-      <p>Generating product categories & manufacturing processes...</p>
-      <div class="substep">Analyzing material properties with LLM — typically takes 3-6 seconds</div>
+      <p>Discovering all the products you can make...</p>
+      <div class="substep">Our AI is studying this material — just a few seconds</div>
     </div>
   `;
 
@@ -917,6 +1259,20 @@ function renderCategoryResults(data) {
       </div>
       ${refreshBtn}
     </div>
+    <div class="equipment-filter-bar">
+      <button class="equip-option active" onclick="filterEquipment('all', this)">
+        <span class="equip-icon">📋</span> All Products
+      </button>
+      <button class="equip-option" onclick="filterEquipment('easy', this)">
+        <span class="equip-icon">🏠</span> Home / Hand Tools
+      </button>
+      <button class="equip-option" onclick="filterEquipment('medium', this)">
+        <span class="equip-icon">🔧</span> Small Workshop
+      </button>
+      <button class="equip-option" onclick="filterEquipment('hard', this)">
+        <span class="equip-icon">🏭</span> Commercial Scale
+      </button>
+    </div>
     <div class="category-accordion">
   `;
 
@@ -945,6 +1301,16 @@ function renderCategoryResults(data) {
   return html;
 }
 
+function filterEquipment(level, btn) {
+  activeEquipFilter = level;
+  document.querySelectorAll('.equip-option').forEach(el => el.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  document.querySelectorAll('.process-card').forEach(card => {
+    if(level === 'all' || card.dataset.difficulty === level) card.style.display = '';
+    else card.style.display = 'none';
+  });
+}
+
 function renderProductProcess(product) {
   const diffClass = product.difficulty === 'Easy' ? 'diff-easy'
     : product.difficulty === 'Hard' ? 'diff-hard' : 'diff-medium';
@@ -956,7 +1322,7 @@ function renderProductProcess(product) {
   const skills = product.required_skills || [];
 
   return `
-    <div class="process-card">
+    <div class="process-card" data-difficulty="${(product.difficulty || 'Medium').toLowerCase()}">
       <div class="process-header">
         <div class="process-title">${product.name}</div>
         <div class="process-badges">
@@ -964,10 +1330,23 @@ function renderProductProcess(product) {
           <span class="pot-badge ${potentialClass}">${(product.market_potential || 'medium').charAt(0).toUpperCase() + (product.market_potential || 'medium').slice(1)} Demand</span>
         </div>
       </div>
-      ${product.estimated_cost ? `<div class="process-cost">💰 Est. Cost: ${product.estimated_cost}</div>` : ''}
+      <div class="recipe-meta-row">
+        <div class="recipe-meta-item">
+          <span class="recipe-meta-icon">⏱️</span>
+          <div><span class="recipe-meta-label">Difficulty</span><br><span class="recipe-meta-value">${product.difficulty === 'Easy' ? 'Beginner-friendly' : product.difficulty === 'Hard' ? 'Needs training & equipment' : 'Some practice needed'}</span></div>
+        </div>
+        <div class="recipe-meta-item">
+          <span class="recipe-meta-icon">📊</span>
+          <div><span class="recipe-meta-label">Market Demand</span><br><span class="recipe-meta-value">${(product.market_potential || 'medium').charAt(0).toUpperCase() + (product.market_potential || 'medium').slice(1)}</span></div>
+        </div>
+        ${product.estimated_cost ? `<div class="recipe-meta-item">
+          <span class="recipe-meta-icon">💰</span>
+          <div><span class="recipe-meta-label">Est. Cost</span><br><span class="recipe-meta-value">${product.estimated_cost}</span></div>
+        </div>` : ''}
+      </div>
 
       <div class="process-section">
-        <div class="process-section-title">📋 Manufacturing Process</div>
+        <div class="process-section-title">📋 Step-by-Step Process (Recipe)</div>
         <div class="process-timeline">
           ${steps.map((step, i) => `
             <div class="timeline-step">
@@ -982,7 +1361,7 @@ function renderProductProcess(product) {
       </div>
 
       <div class="process-section">
-        <div class="process-section-title">🛠 Required Skills</div>
+        <div class="process-section-title">🛠 Skills & Tools Needed</div>
         <div class="skill-chips">
           ${skills.map(s => `<span class="skill-chip">${s}</span>`).join('')}
         </div>
@@ -1045,8 +1424,8 @@ function openEnhancementModal(mfpId, recIndex) {
       <div class="enhancement-modal-body">
         <div class="market-loading">
           <div class="spinner"></div>
-          <p>Generating product enhancement plan...</p>
-          <div class="substep">Analyzing design, marketing, packaging & sales channels with AI</div>
+          <p>Building your detailed business blueprint...</p>
+          <div class="substep">Creating design ideas, packaging suggestions, and sales strategies</div>
         </div>
       </div>
     </div>
@@ -1089,263 +1468,366 @@ function renderEnhancementContent(data, recommendation, mfpId) {
   const body = document.querySelector('.enhancement-modal-body');
   if (!body) return;
 
-  const e = data.enhancement || {};
+  const e = (data && data.enhancement) ? data.enhancement : (data || {});
   const pd = e.product_design || {};
   const ms = e.marketing_strategy || {};
   const pkg = e.packaging || {};
   const sc = e.sales_channels || {};
 
-  // Get targeted product examples from backend enhancement result
+  const productName = recommendation ? recommendation.product_name : 'Product';
+  const mfpObj = allMaterials.find(m => m.mfp_id === mfpId) || {};
+  const mfpName = data.mfp_name || mfpObj.name || 'Forest Produce';
+
   const relatedExamples = (data.related_examples && data.related_examples.length > 0)
     ? data.related_examples
     : [];
 
   body.innerHTML = `
     <div class="enhancement-tabs">
-      <button class="enh-tab active" onclick="switchEnhancementTab('design', this)">🎨 Design</button>
-      <button class="enh-tab" onclick="switchEnhancementTab('marketing', this)">📢 Marketing</button>
-      <button class="enh-tab" onclick="switchEnhancementTab('packaging', this)">📦 Packaging</button>
-      <button class="enh-tab" onclick="switchEnhancementTab('sales', this)">🏪 Sales</button>
+      <button class="enh-tab active" onclick="switchEnhancementTab('design', this)">🎨 Look & Feel</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('marketing', this)">📢 How to Sell</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('packaging', this)">📦 Packaging Ideas</button>
+      <button class="enh-tab" onclick="switchEnhancementTab('sales', this)">🏪 Where to Sell</button>
       <button class="enh-tab" onclick="switchEnhancementTab('examples', this)">📸 Examples${relatedExamples.length > 0 ? ' (' + relatedExamples.length + ')' : ''}</button>
     </div>
 
     <!-- Design Tab -->
     <div class="enh-panel active" id="enh-design">
-      ${renderDesignTab(pd)}
+      ${renderDesignTab(pd, recommendation, mfpName)}
     </div>
 
     <!-- Marketing Tab -->
     <div class="enh-panel" id="enh-marketing">
-      ${renderMarketingTab(ms)}
+      ${renderMarketingTab(ms, recommendation, mfpName)}
     </div>
 
     <!-- Packaging Tab -->
     <div class="enh-panel" id="enh-packaging">
-      ${renderPackagingTab(pkg)}
+      ${renderPackagingTab(pkg, recommendation, mfpName)}
     </div>
 
     <!-- Sales Tab -->
     <div class="enh-panel" id="enh-sales">
-      ${renderSalesTab(sc)}
+      ${renderSalesTab(sc, recommendation, mfpName)}
     </div>
 
     <!-- Market Examples Tab -->
     <div class="enh-panel" id="enh-examples">
-      ${renderMarketExamplesTab(relatedExamples, recommendation.product_name)}
+      ${renderMarketExamplesTab(relatedExamples, productName)}
     </div>
 
     <div class="enhancement-footer">
-      <span>Generated in ${data.elapsed_seconds || '?'}s · Provider: ${data.provider || 'unknown'}${data.fallback_used ? ' (fallback)' : ''}</span>
+      <button class="print-handout-btn" onclick="window.print()" title="Print this blueprint">🖨️ Print Business Handout</button>
+      <span>Generated in ${data.elapsed_seconds || '?'}s${data.fallback_used ? ' (fallback mode)' : ''}</span>
     </div>
   `;
 }
 
-function renderDesignTab(pd) {
-  const colors = (pd.color_palette || []).map(c =>
-    `<div class="color-swatch-card">
-      <div class="color-swatch" style="background:${c.hex || '#888'}"></div>
+function renderDesignTab(pd, recommendation, mfpName) {
+  const productName = recommendation ? recommendation.product_name : 'Product';
+  const rawMfp = mfpName || 'Forest Material';
+
+  const defaultColors = [
+    { name: 'Forest Green', hex: '#1E5138', usage: 'Primary brand color — represents forest origin' },
+    { name: 'Warm Cream', hex: '#F5F0E1', usage: 'Background and label base color' },
+    { name: 'Terracotta', hex: '#C2593F', usage: 'Accent highlights and tribal motifs' },
+    { name: 'Charcoal', hex: '#2C2C2C', usage: 'Typography and clear borders' }
+  ];
+  const colorList = (pd.color_palette && pd.color_palette.length > 0) ? pd.color_palette : defaultColors;
+  const colorsHtml = colorList.map(c => `
+    <div class="color-swatch-card">
+      <div class="color-swatch" style="background:${c.hex || '#1E5138'}"></div>
       <div class="color-info">
         <strong>${escapeHtml(c.name || 'Color')}</strong>
         <span class="color-hex">${escapeHtml(c.hex || '')}</span>
-        <span class="color-usage">${escapeHtml(c.usage || '')}</span>
+        <span class="color-usage">${escapeHtml(c.usage || 'Brand accent')}</span>
       </div>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
 
-  const tips = (pd.modernization_tips || []).map(t =>
-    '<li>' + escapeHtml(t) + '</li>'
-  ).join('');
+  const defaultTips = [
+    `Use clean, minimalist labeling to highlight the natural purity of ${rawMfp}.`,
+    `Incorporate a matte kraft-paper texture finish for a premium tactile feel.`,
+    `Include a small story card or QR code highlighting the tribal artisan's craftsmanship.`
+  ];
+  const tipList = (pd.modernization_tips && pd.modernization_tips.length > 0) ? pd.modernization_tips : defaultTips;
+  const tipsHtml = tipList.map(t => `<li>${escapeHtml(t)}</li>`).join('');
 
-  const principles = (pd.design_principles || []).map(p =>
-    '<li>' + escapeHtml(p) + '</li>'
-  ).join('');
+  const defaultPrinciples = [
+    `Authenticity first — let the natural texture and raw quality of ${rawMfp} shine through.`,
+    `Premium minimalism — clean layouts command a higher perceived retail price.`,
+    `Cultural heritage — incorporate subtle regional tribal motifs without overwhelming the modern design.`
+  ];
+  const principleList = (pd.design_principles && pd.design_principles.length > 0) ? pd.design_principles : defaultPrinciples;
+  const principlesHtml = principleList.map(p => `<li>${escapeHtml(p)}</li>`).join('');
+
+  const inspiration = pd.inspiration || `Scandinavian minimalism meets Indian tribal heritage — clean lines, natural materials, and warm earth tones that highlight the craftsmanship of ${rawMfp}.`;
+  const formFactor = pd.form_factor || `A compact, ergonomic ${productName.toLowerCase()} designed for retail display, easy handling, and gift packaging.`;
 
   return `
     <div class="enh-section">
-      <h3>🎯 Design Inspiration</h3>
+      <h3>🎯 What Should It Look Like?</h3>
       <div class="enh-inspiration-card">
-        <p>${escapeHtml(pd.inspiration || 'Modern design meets traditional craftsmanship')}</p>
+        <p>${escapeHtml(inspiration)}</p>
       </div>
     </div>
 
     <div class="enh-section">
-      <h3>📐 Form Factor</h3>
-      <p class="enh-description">${escapeHtml(pd.form_factor || '')}</p>
+      <h3>📐 Shape & Form Factor</h3>
+      <p class="enh-description">${escapeHtml(formFactor)}</p>
     </div>
 
     <div class="enh-section">
-      <h3>🎨 Recommended Color Palette</h3>
-      <div class="color-palette-grid">${colors}</div>
+      <h3>🎨 Suggested Color Palette</h3>
+      <div class="color-palette-grid">${colorsHtml}</div>
     </div>
 
     <div class="enh-two-col">
       <div class="enh-section">
-        <h3>✨ Modernization Tips</h3>
-        <ul class="enh-tip-list">${tips}</ul>
+        <h3>✨ How to Make It Modern</h3>
+        <ul class="enh-tip-list">${tipsHtml}</ul>
       </div>
       <div class="enh-section">
-        <h3>📌 Design Principles</h3>
-        <ul class="enh-tip-list">${principles}</ul>
+        <h3>📌 Key Design Rules</h3>
+        <ul class="enh-tip-list">${principlesHtml}</ul>
       </div>
     </div>
   `;
 }
 
-function renderMarketingTab(ms) {
-  const segments = (ms.target_segments || []).map(s =>
-    `<div class="segment-card">
+function renderMarketingTab(ms, recommendation, mfpName) {
+  const productName = recommendation ? recommendation.product_name : 'Product';
+  const rawMfp = mfpName || 'Forest Produce';
+  const expectedPrice = recommendation ? (recommendation.expected_selling_price_inr || 300) : 300;
+
+  const positioning = ms.positioning || `Handcrafted ${productName} from tribal artisans — where forest heritage meets modern living.`;
+  const usp = ms.usp || `100% natural ${rawMfp}-based product, sustainably harvested and crafted by local tribal communities.`;
+  const pricing = ms.pricing_strategy || `Position at a 20–30% premium over mass synthetic alternatives. Price around ₹${Math.round(expectedPrice)} to highlight organic purity.`;
+
+  const defaultSegments = [
+    { segment: "Urban Eco-Conscious Consumers", description: "25–45 year olds in metro cities seeking organic, chemical-free lifestyle products", approach: "Instagram & social media storytelling focusing on eco-friendly lifestyle" },
+    { segment: "Premium Gift Buyers", description: "Shoppers seeking unique, handcrafted, story-driven gifts for festivals and celebrations", approach: "Featured hampers on curated gifting portals and corporate gift sets" },
+    { segment: "Export & NRI Market", description: "Indian diaspora and international buyers seeking authentic Indian craft heritage", approach: "Amazon Global, Etsy, and tribal craft export exhibitions" }
+  ];
+  const segmentList = (ms.target_segments && ms.target_segments.length > 0) ? ms.target_segments : defaultSegments;
+  const segmentsHtml = segmentList.map(s => `
+    <div class="segment-card">
       <div class="segment-header">
-        <h4>${escapeHtml(s.segment || 'Segment')}</h4>
+        <h4>${escapeHtml(s.segment || 'Customer Segment')}</h4>
       </div>
       <p class="segment-desc">${escapeHtml(s.description || '')}</p>
       <div class="segment-approach">
         <span class="approach-label">📍 Approach:</span>
         <span>${escapeHtml(s.approach || '')}</span>
       </div>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
 
-  const digitalTactics = (ms.digital_marketing || []).map(t =>
-    '<li>' + escapeHtml(t) + '</li>'
-  ).join('');
+  const story = ms.storytelling_angle || `Every ${productName} supports a tribal family's livelihood and preserves centuries of traditional forest knowledge passed down through generations.`;
+
+  const defaultTactics = [
+    `Create short video reels showing tribal artisans harvesting and making ${productName}.`,
+    `Partner with sustainable lifestyle creators for authentic unboxing reviews.`,
+    `Run targeted social media ads with 'forest-to-home' visual narrative.`
+  ];
+  const tacticList = (ms.digital_marketing && ms.digital_marketing.length > 0) ? ms.digital_marketing : defaultTactics;
+  const tacticsHtml = tacticList.map(t => `<li>${escapeHtml(t)}</li>`).join('');
 
   return `
     <div class="enh-section">
-      <h3>💡 Positioning & USP</h3>
+      <h3>💡 What Makes Your Product Special</h3>
       <div class="enh-highlight-card">
-        <div class="highlight-row"><span class="highlight-label">Positioning</span><p>${escapeHtml(ms.positioning || '')}</p></div>
-        <div class="highlight-row"><span class="highlight-label">USP</span><p>${escapeHtml(ms.usp || '')}</p></div>
-        <div class="highlight-row"><span class="highlight-label">Pricing</span><p>${escapeHtml(ms.pricing_strategy || '')}</p></div>
+        <div class="highlight-row"><span class="highlight-label">Positioning</span><p>${escapeHtml(positioning)}</p></div>
+        <div class="highlight-row"><span class="highlight-label">USP</span><p>${escapeHtml(usp)}</p></div>
+        <div class="highlight-row"><span class="highlight-label">Pricing</span><p>${escapeHtml(pricing)}</p></div>
       </div>
     </div>
 
     <div class="enh-section">
-      <h3>🎯 Target Customer Segments</h3>
-      <div class="segments-grid">${segments}</div>
+      <h3>🎯 Who Will Buy This?</h3>
+      <div class="segments-grid">${segmentsHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>📖 Storytelling Angle</h3>
+      <h3>📖 Your Product Story</h3>
       <div class="enh-story-card">
-        <p>${escapeHtml(ms.storytelling_angle || '')}</p>
+        <p>${escapeHtml(story)}</p>
       </div>
     </div>
 
     <div class="enh-section">
-      <h3>📱 Digital Marketing Tactics</h3>
-      <ul class="enh-tip-list">${digitalTactics}</ul>
+      <h3>📱 Online Promotion Ideas</h3>
+      <ul class="enh-tip-list">${tacticsHtml}</ul>
     </div>
   `;
 }
 
-function renderPackagingTab(pkg) {
-  const colorScheme = (pkg.color_scheme || []).map(c =>
-    `<div class="color-swatch-card compact">
-      <div class="color-swatch" style="background:${c.hex || '#888'}"></div>
+function renderPackagingTab(pkg, recommendation, mfpName) {
+  const productName = recommendation ? recommendation.product_name : 'Product';
+  const rawMfp = mfpName || 'Forest Produce';
+  const expectedPrice = recommendation ? (recommendation.expected_selling_price_inr || 300) : 300;
+
+  const material = pkg.material || `Recyclable unbleached kraft paper box with a plantable seed-paper insert.`;
+  const secondary = pkg.secondary_packaging || `Corrugated cardboard mailer box with printed tribal art pattern for shipping protection.`;
+
+  const defaultPkgColors = [
+    { name: 'Kraft Brown', hex: '#B8860B', usage: 'Primary box base material' },
+    { name: 'Forest Green', hex: '#1E5138', usage: 'Brand logo and organic trust mark' },
+    { name: 'Warm Gold', hex: '#D4A853', usage: 'Border accents and quality seals' }
+  ];
+  const pkgColorList = (pkg.color_scheme && pkg.color_scheme.length > 0) ? pkg.color_scheme : defaultPkgColors;
+  const pkgColorsHtml = pkgColorList.map(c => `
+    <div class="color-swatch-card compact">
+      <div class="color-swatch" style="background:${c.hex || '#B8860B'}"></div>
       <div class="color-info">
         <strong>${escapeHtml(c.name || 'Color')}</strong>
-        <span class="color-usage">${escapeHtml(c.usage || '')}</span>
+        <span class="color-usage">${escapeHtml(c.usage || 'Packaging accent')}</span>
       </div>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
 
-  const labels = (pkg.label_elements || []).map(l =>
-    '<li>' + escapeHtml(l) + '</li>'
-  ).join('');
+  const defaultLabels = [
+    `Traditional regional tribal art motif border (Warli / Gond style)`,
+    `QR code linking to artisan video and origin story`,
+    `'Made from Pure ${rawMfp}' origin badge`,
+    `Net weight, batch number, MRP, and FSSAI mark`
+  ];
+  const labelList = (pkg.label_elements && pkg.label_elements.length > 0) ? pkg.label_elements : defaultLabels;
+  const labelsHtml = labelList.map(l => `<li>${escapeHtml(l)}</li>`).join('');
 
-  const certs = (pkg.certifications || []).map(c => {
+  const defaultCerts = [
+    { name: "FSSAI License / Registration", why: "Mandatory for food, herbal & cosmetic products sold in India", difficulty: "Medium" },
+    { name: "India Organic (NPOP)", why: "Validates natural chemical-free origin — commands 15–20% price premium", difficulty: "Medium" },
+    { name: "Craft Mark / Tribal GI Tag", why: `Protects and authenticates tribal origin of ${rawMfp}`, difficulty: "Easy" }
+  ];
+  const certList = (pkg.certifications && pkg.certifications.length > 0) ? pkg.certifications : defaultCerts;
+  const certsHtml = certList.map(c => {
     const diffClass = (c.difficulty || '').toLowerCase() === 'easy' ? 'cert-easy'
       : (c.difficulty || '').toLowerCase() === 'hard' ? 'cert-hard' : 'cert-medium';
     return `<div class="cert-card">
       <div class="cert-header">
-        <span class="cert-name">${escapeHtml(c.name || '')}</span>
+        <span class="cert-name">${escapeHtml(c.name || 'Certification')}</span>
         <span class="cert-diff ${diffClass}">${escapeHtml(c.difficulty || 'Medium')}</span>
       </div>
-      <p class="cert-why">${escapeHtml(c.why || '')}</p>
+      <p class="cert-why">${escapeHtml(c.why || 'Validates quality')}</p>
     </div>`;
   }).join('');
 
-  const sizes = (pkg.size_variants || []).map(s =>
-    `<div class="size-variant-card">
+  const defaultSizes = [
+    { size: "Sample / Trial Pack", price_range: `₹${Math.round(expectedPrice * 0.5)}–₹${Math.round(expectedPrice * 0.7)}`, target: "First-time buyers & online trial orders" },
+    { size: "Standard Retail Pack", price_range: `₹${Math.round(expectedPrice)}–₹${Math.round(expectedPrice * 1.3)}`, target: "Regular daily consumers" },
+    { size: "Premium Gift Hamper", price_range: `₹${Math.round(expectedPrice * 1.8)}–₹${Math.round(expectedPrice * 2.5)}`, target: "Festive gifting & corporate orders" }
+  ];
+  const sizeList = (pkg.size_variants && pkg.size_variants.length > 0) ? pkg.size_variants : defaultSizes;
+  const sizesHtml = sizeList.map(s => `
+    <div class="size-variant-card">
       <div class="size-name">${escapeHtml(s.size || '')}</div>
       <div class="size-price">${escapeHtml(s.price_range || '')}</div>
       <div class="size-target">${escapeHtml(s.target || '')}</div>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
+
+  const ecoNotes = pkg.sustainability_notes || `100% plastic-free packaging. Use compostable jute twine, paper tape, and biodegradable mailers.`;
 
   return `
     <div class="enh-two-col">
       <div class="enh-section">
-        <h3>📦 Packaging Material</h3>
+        <h3>📦 What to Pack It In</h3>
         <div class="enh-info-card">
-          <div class="info-row"><span class="info-label">Primary</span><span>${escapeHtml(pkg.material || '')}</span></div>
-          <div class="info-row"><span class="info-label">Secondary</span><span>${escapeHtml(pkg.secondary_packaging || '')}</span></div>
+          <div class="info-row"><span class="info-label">Primary</span><span>${escapeHtml(material)}</span></div>
+          <div class="info-row"><span class="info-label">Secondary</span><span>${escapeHtml(secondary)}</span></div>
         </div>
       </div>
       <div class="enh-section">
-        <h3>🎨 Packaging Colors</h3>
-        <div class="color-palette-grid compact">${colorScheme}</div>
+        <h3>🎨 Package Look</h3>
+        <div class="color-palette-grid compact">${pkgColorsHtml}</div>
       </div>
     </div>
 
     <div class="enh-section">
-      <h3>🏷️ Label Elements</h3>
-      <ul class="enh-checklist">${labels}</ul>
+      <h3>🏷️ What Goes on the Label</h3>
+      <ul class="enh-checklist">${labelsHtml}</ul>
     </div>
 
     <div class="enh-section">
-      <h3>📜 Certifications Needed</h3>
-      <div class="certs-grid">${certs}</div>
+      <h3>📜 Certificates & Trust Marks</h3>
+      <div class="certs-grid">${certsHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>📏 Size Variants</h3>
-      <div class="size-grid">${sizes}</div>
+      <h3>📏 Pack Sizes & Pricing</h3>
+      <div class="size-grid">${sizesHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>🌱 Sustainability</h3>
+      <h3>🌱 Eco-Friendly Points</h3>
       <div class="enh-story-card green">
-        <p>${escapeHtml(pkg.sustainability_notes || '')}</p>
+        <p>${escapeHtml(ecoNotes)}</p>
       </div>
     </div>
   `;
 }
 
-function renderSalesTab(sc) {
-  const online = (sc.online || []).map(p => {
+function renderSalesTab(sc, recommendation, mfpName) {
+  const productName = recommendation ? recommendation.product_name : 'Product';
+
+  const defaultOnline = [
+    { platform: "Tribes India (TRIFED)", why: "Government portal specifically for tribal artisans with zero listing fees", setup_difficulty: "Easy" },
+    { platform: "Amazon Karigar / Saheli", why: "Dedicated e-commerce storefront for Indian artisans with high buyer reach", setup_difficulty: "Medium" },
+    { platform: "ONDC Network", why: "Government direct-to-consumer digital commerce network with direct payments", setup_difficulty: "Easy" },
+    { platform: "Flipkart Samarth", why: "National marketplace program supporting rural handicraft clusters", setup_difficulty: "Medium" }
+  ];
+  const onlineList = (sc.online && sc.online.length > 0) ? sc.online : defaultOnline;
+  const onlineHtml = onlineList.map(p => {
     const diffClass = (p.setup_difficulty || '').toLowerCase() === 'easy' ? 'cert-easy'
       : (p.setup_difficulty || '').toLowerCase() === 'hard' ? 'cert-hard' : 'cert-medium';
     return `<div class="channel-card">
       <div class="channel-header">
-        <h4>${escapeHtml(p.platform || '')}</h4>
-        <span class="cert-diff ${diffClass}">${escapeHtml(p.setup_difficulty || '')}</span>
+        <h4>${escapeHtml(p.platform || 'Platform')}</h4>
+        <span class="cert-diff ${diffClass}">${escapeHtml(p.setup_difficulty || 'Medium')}</span>
       </div>
       <p>${escapeHtml(p.why || '')}</p>
     </div>`;
   }).join('');
 
-  const offline = (sc.offline || []).map(c =>
-    `<div class="channel-card">
-      <h4>${escapeHtml(c.channel || '')}</h4>
+  const defaultOffline = [
+    { channel: "State Tribal Crafts Expos", description: "Participate in Surajkund Mela, Dilli Haat, and Saras Melas for direct sales and publicity." },
+    { channel: "Urban Wellness & Organic Stores", description: "Place trial stock in metro organic stores and natural product outlets." },
+    { channel: "Heritage Resorts & Spas", description: "Supply customized gift packs to eco-resorts as luxury guest souvenirs." }
+  ];
+  const offlineList = (sc.offline && sc.offline.length > 0) ? sc.offline : defaultOffline;
+  const offlineHtml = offlineList.map(c => `
+    <div class="channel-card">
+      <h4>${escapeHtml(c.channel || 'Channel')}</h4>
       <p>${escapeHtml(c.description || '')}</p>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
 
-  const b2b = (sc.b2b || []).map(b =>
-    `<div class="channel-card">
-      <h4>${escapeHtml(b.buyer_type || '')}</h4>
+  const defaultB2b = [
+    { buyer_type: "Corporate Gift Aggregators", approach: "Offer bulk customized hampers for Diwali and Corporate hampers." },
+    { buyer_type: "Organic Product Distributors", approach: "Connect through trade meets like BioFach India and Sarvodaya fairs." }
+  ];
+  const b2bList = (sc.b2b && sc.b2b.length > 0) ? sc.b2b : defaultB2b;
+  const b2bHtml = b2bList.map(b => `
+    <div class="channel-card">
+      <h4>${escapeHtml(b.buyer_type || 'Buyer Type')}</h4>
       <p>${escapeHtml(b.approach || '')}</p>
-    </div>`
-  ).join('');
+    </div>
+  `).join('');
 
-  const exportChannels = (sc.export || []).map(e => {
+  const defaultExport = [
+    { market: "EU & UK", potential: "High", requirements: "Organic certification, REACH eco-compliance, English eco-labeling" },
+    { market: "USA & Canada", potential: "Medium", requirements: "FDA product listing, USDA organic recognition" },
+    { market: "Middle East & SE Asia", potential: "Medium", requirements: "Halal / Organic declaration, local language tags" }
+  ];
+  const exportList = (sc.export && sc.export.length > 0) ? sc.export : defaultExport;
+  const exportHtml = exportList.map(e => {
     const potClass = (e.potential || '').toLowerCase() === 'high' ? 'pot-high'
       : (e.potential || '').toLowerCase() === 'low' ? 'pot-low' : 'pot-medium';
     return `<div class="channel-card">
       <div class="channel-header">
-        <h4>${escapeHtml(e.market || '')}</h4>
-        <span class="pot-badge ${potClass}">${escapeHtml(e.potential || '')} potential</span>
+        <h4>${escapeHtml(e.market || 'Market')}</h4>
+        <span class="pot-badge ${potClass}">${escapeHtml(e.potential || 'Medium')} potential</span>
       </div>
       <p>${escapeHtml(e.requirements || '')}</p>
     </div>`;
@@ -1353,23 +1835,23 @@ function renderSalesTab(sc) {
 
   return `
     <div class="enh-section">
-      <h3>🛒 Online Platforms</h3>
-      <div class="channels-grid">${online}</div>
+      <h3>🛒 Sell Online Here</h3>
+      <div class="channels-grid">${onlineHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>🏬 Offline Channels</h3>
-      <div class="channels-grid">${offline}</div>
+      <h3>🏬 Sell In-Person Here</h3>
+      <div class="channels-grid">${offlineHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>🏢 B2B Opportunities</h3>
-      <div class="channels-grid">${b2b}</div>
+      <h3>🏢 Sell to Businesses</h3>
+      <div class="channels-grid">${b2bHtml}</div>
     </div>
 
     <div class="enh-section">
-      <h3>🌍 Export Markets</h3>
-      <div class="channels-grid">${exportChannels}</div>
+      <h3>🌍 International Opportunities</h3>
+      <div class="channels-grid">${exportHtml}</div>
     </div>
   `;
 }

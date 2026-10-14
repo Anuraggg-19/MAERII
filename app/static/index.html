@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=3.1" />
+  <link rel="stylesheet" href="/static/style.css?v=4.2" />
 </head>
 <body>
 
@@ -21,7 +21,7 @@
         <h1>MAERII</h1>
         <button class="theme-toggle" id="themeToggle" title="Toggle light/dark theme" onclick="toggleTheme()">☀️</button>
       </div>
-      <div class="subtitle">Knowledge Engine · 115 MFP Items</div>
+      <div class="subtitle">Forest Produce Business Guide</div>
     </div>
     <div class="search-container">
       <input
@@ -32,6 +32,7 @@
         autocomplete="off"
       />
     </div>
+    <div class="sidebar-category-pills" id="categoryPills"></div>
     <div class="material-list" id="materialList">
       <!-- Populated by JS -->
     </div>
@@ -44,7 +45,7 @@
     <div class="empty-state" id="emptyState">
       <div class="icon">🌿</div>
       <h2>Select a Material</h2>
-      <p>Choose an item from the list to view its knowledge profile and market data.</p>
+      <p>Pick a forest produce from the list to discover what you can make, real market prices, and your earning potential.</p>
     </div>
 
     <!-- Detail view (hidden initially) -->
@@ -55,6 +56,6 @@
 
 </div>
 
-<script src="/static/app.js?v=3.1"></script>
+<script src="/static/app.js?v=4.2"></script>
 </body>
 </html>
