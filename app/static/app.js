@@ -107,16 +107,31 @@ function getMaterialCategoryIcon(category) {
   return '🌿';
 }
 
+function getMaterialBroadCategory(category) {
+  const c = (category || '').toLowerCase();
+  if (c.includes('agri')) return 'agriculture';
+  return 'forest';
+}
+
 function renderCategoryPills() {
   const pillsContainer = document.getElementById('categoryPills');
   if (!pillsContainer) return;
-  const categories = [...new Set(allMaterials.map(m => m.category).filter(Boolean))].sort();
-  let html = `<button class="category-pill ${activeCategoryFilter === 'all' ? 'active' : ''}" onclick="filterByCategory('all')">All <span class="pill-count">${allMaterials.length}</span></button>`;
-  categories.forEach(cat => {
-    const count = allMaterials.filter(m => m.category === cat).length;
-    html += `<button class="category-pill ${activeCategoryFilter === cat ? 'active' : ''}" onclick="filterByCategory('${escapeHtml(cat)}')">${getMaterialCategoryIcon(cat)} ${escapeHtml(cat)} <span class="pill-count">${count}</span></button>`;
-  });
-  pillsContainer.innerHTML = html;
+
+  const totalCount = allMaterials.length;
+  const forestCount = allMaterials.filter(m => getMaterialBroadCategory(m.category) === 'forest').length;
+  const agriCount = allMaterials.filter(m => getMaterialBroadCategory(m.category) === 'agriculture').length;
+
+  pillsContainer.innerHTML = `
+    <button class="sidebar-pill ${activeCategoryFilter === 'all' ? 'active' : ''}" onclick="filterByCategory('all')">
+      🌐 All <span class="pill-count">${totalCount}</span>
+    </button>
+    <button class="sidebar-pill ${activeCategoryFilter === 'forest' ? 'active' : ''}" onclick="filterByCategory('forest')">
+      🌲 Forest Produce <span class="pill-count">${forestCount}</span>
+    </button>
+    <button class="sidebar-pill ${activeCategoryFilter === 'agriculture' ? 'active' : ''}" onclick="filterByCategory('agriculture')">
+      🌾 Agriculture <span class="pill-count">${agriCount}</span>
+    </button>
+  `;
 }
 
 function filterByCategory(cat) {
@@ -142,10 +157,14 @@ function filterMaterials() {
     const matchSearch = !q || m.name.toLowerCase().includes(q) ||
       (m.scientific_name || "").toLowerCase().includes(q) ||
       (m.category || "").toLowerCase().includes(q);
-    const matchCategory = activeCategoryFilter === 'all' || m.category === activeCategoryFilter;
+    const broadCat = getMaterialBroadCategory(m.category);
+    const matchCategory = activeCategoryFilter === 'all' || broadCat === activeCategoryFilter;
     return matchSearch && matchCategory;
   });
   renderMaterialList(filtered);
+  if (sidebarFooterEl) {
+    sidebarFooterEl.textContent = `${filtered.length} of ${allMaterials.length} materials`;
+  }
 }
 
 // ── Material Detail ────────────────────────────────────────────────────────
@@ -316,8 +335,7 @@ function renderDetail(data) {
 
     <!-- Tab 4: Recommendations -->
     <div class="tab-panel" id="tab-recommendations">
-      <div class="market-section" id="recommendationSection">
-        <h2>Product Recommendations</h2>
+      <div class="market-section" id="recommendationSection" style="margin-top:0;padding-top:0;">
         <div id="recommendationPanel">
           ${renderRecommendationPanel(m.mfp_id, g.states || [])}
         </div>
@@ -894,126 +912,261 @@ function renderRecommendationPanel(mfpId, states) {
   }
   
   const uniqueStates = [...new Set(states)].sort();
+
+  // Region-to-motif mapping for smart cultural motif suggestions
+  const regionMotifs = {
+    'Madhya Pradesh': 'Gond art patterns',
+    'Maharashtra': 'Warli art patterns',
+    'Rajasthan': 'Mandana / Phad art',
+    'Odisha': 'Pattachitra / Saura art',
+    'Jharkhand': 'Sohrai / Khovar art',
+    'Chhattisgarh': 'Pithora / Dhokra patterns',
+    'Gujarat': 'Rogan / Ahir embroidery motifs',
+    'West Bengal': 'Patachitra / Kantha motifs',
+    'Andhra Pradesh': 'Cheriyal / Nirmal art',
+    'Telangana': 'Cheriyal scroll motifs',
+    'Karnataka': 'Lambani / Mysore motifs',
+    'Tamil Nadu': 'Kolam / Tanjore motifs',
+    'Kerala': 'Mural / Theyyam motifs',
+    'Assam': 'Muga silk / Jaapi motifs',
+    'Nagaland': 'Naga tribal motifs',
+    'Meghalaya': 'Khasi / Garo motifs',
+    'Manipur': 'Meitei / Moirang motifs',
+    'Mizoram': 'Puan / Mizo motifs',
+    'Tripura': 'Risa / Tripuri motifs',
+    'Arunachal Pradesh': 'Monpa / Apatani motifs',
+    'Sikkim': 'Lepcha / Bhutia motifs',
+    'Himachal Pradesh': 'Chamba Rumal / Kinnauri motifs',
+    'Uttarakhand': 'Aipan art patterns',
+    'Bihar': 'Madhubani art patterns',
+    'Jammu & Kashmir': 'Pashmina / Papier-mâché motifs',
+    'Punjab': 'Phulkari motifs',
+    'Goa': 'Kunbi motifs',
+  };
+
+  const regionOptions = uniqueStates.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   
   return `
-    <form class="wizard-form" onsubmit="submitRecommendations(event, ${mfpId})">
-      <div class="wizard-step-group">
-        <div class="wizard-step-title">
-          <span class="wizard-step-number">1</span>
-          Who is making the product?
+    <div id="wizardFormWrapper">
+    <form class="wizard-form wizard-command-center" onsubmit="submitRecommendations(event, ${mfpId})">
+      <div class="wizard-layout-split">
+        <!-- Left Column: The 4 Questions -->
+        <div class="wizard-left-panel">
+          <div class="wizard-panel-header">
+            <span class="wizard-panel-title-icon">⚙️</span>
+            <div>
+              <div class="wizard-panel-title">Artisan & Production Preferences</div>
+              <div class="wizard-panel-subtitle">Customize the business model for your community or enterprise</div>
+            </div>
+          </div>
+
+          <div class="wizard-grid-2x2">
+            <!-- Question 1: Skill -->
+            <div class="wizard-step-group">
+              <div class="wizard-step-title">
+                <span class="wizard-step-number">1</span>
+                Who is making the product?
+              </div>
+              <div class="wizard-card-options">
+                <label class="wizard-card-option selected" onclick="selectWizardOption(this, 'skill', 'Beginner')">
+                  <input type="radio" name="artisan_skill_level" value="Beginner" checked style="display:none">
+                  <span class="wizard-card-icon">👩‍🌾</span>
+                  <span class="wizard-card-text">Beginner</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'skill', 'Intermediate')">
+                  <input type="radio" name="artisan_skill_level" value="Intermediate" style="display:none">
+                  <span class="wizard-card-icon">👨‍🎨</span>
+                  <span class="wizard-card-text">Intermediate</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'skill', 'Advanced')">
+                  <input type="radio" name="artisan_skill_level" value="Advanced" style="display:none">
+                  <span class="wizard-card-icon">🏆</span>
+                  <span class="wizard-card-text">Advanced</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Question 2: Budget -->
+            <div class="wizard-step-group">
+              <div class="wizard-step-title">
+                <span class="wizard-step-number">2</span>
+                Starting capital / budget?
+              </div>
+              <div class="wizard-card-options">
+                <label class="wizard-card-option selected" onclick="selectWizardOption(this, 'budget', 'Under ₹5K')">
+                  <input type="radio" name="budget_constraint" value="Low" checked style="display:none">
+                  <span class="wizard-card-icon">🌱</span>
+                  <span class="wizard-card-text">Under ₹5K</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'budget', '₹5K–25K')">
+                  <input type="radio" name="budget_constraint" value="Medium" style="display:none">
+                  <span class="wizard-card-icon">🌿</span>
+                  <span class="wizard-card-text">₹5K–25K</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'budget', 'Over ₹25K')">
+                  <input type="radio" name="budget_constraint" value="High" style="display:none">
+                  <span class="wizard-card-icon">🌳</span>
+                  <span class="wizard-card-text">Over ₹25K</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Question 3: Turnaround -->
+            <div class="wizard-step-group">
+              <div class="wizard-step-title">
+                <span class="wizard-step-number">3</span>
+                Production speed needed?
+              </div>
+              <div class="wizard-card-options">
+                <label class="wizard-card-option selected" onclick="selectWizardOption(this, 'speed', 'Quick')">
+                  <input type="radio" name="production_time" value="Quick turnaround" checked style="display:none">
+                  <span class="wizard-card-icon">⚡</span>
+                  <span class="wizard-card-text">Quick</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'speed', 'Moderate')">
+                  <input type="radio" name="production_time" value="Moderate" style="display:none">
+                  <span class="wizard-card-icon">📅</span>
+                  <span class="wizard-card-text">Moderate</span>
+                </label>
+                <label class="wizard-card-option" onclick="selectWizardOption(this, 'speed', 'Long-term')">
+                  <input type="radio" name="production_time" value="Long-term" style="display:none">
+                  <span class="wizard-card-icon">🏗️</span>
+                  <span class="wizard-card-text">Long-term</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Question 4: Region & Cultural Motifs -->
+            <div class="wizard-step-group">
+              <div class="wizard-step-title">
+                <span class="wizard-step-number">4</span>
+                Target region & cultural motifs
+              </div>
+              <div class="wizard-region-box">
+                ${uniqueStates.length > 0 ? `
+                <select class="wizard-region-dropdown" name="region_context" id="regionDropdown_${mfpId}" onchange="updateMotifSuggestion(this)">
+                  <option value="All listed regions">🗺️ All Listed Regions</option>
+                  ${regionOptions}
+                </select>` : '<input type="hidden" name="region_context" value="All listed regions">'}
+
+                <div class="wizard-motif-row" id="motifRow_${mfpId}">
+                  <label class="wizard-motif-toggle">
+                    <input type="checkbox" id="motifCheckbox_${mfpId}" name="include_motifs" onchange="toggleMotifInput(${mfpId})">
+                    <span class="motif-toggle-label" id="motifLabel_${mfpId}">Include local tribal art motifs in designs?</span>
+                  </label>
+                  <input type="hidden" name="cultural_motifs" id="motifValue_${mfpId}" value="">
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="wizard-card-options">
-          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
-            <input type="radio" name="artisan_skill_level" value="Beginner" checked style="display:none">
-            <span class="wizard-card-icon">👩‍🌾</span>
-            <span class="wizard-card-text">Beginner</span>
-            <span class="wizard-card-desc">New to crafting, SHG member</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="artisan_skill_level" value="Intermediate" style="display:none">
-            <span class="wizard-card-icon">👨‍🎨</span>
-            <span class="wizard-card-text">Intermediate</span>
-            <span class="wizard-card-desc">Some experience, basic tools</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="artisan_skill_level" value="Advanced" style="display:none">
-            <span class="wizard-card-icon">🏆</span>
-            <span class="wizard-card-text">Advanced</span>
-            <span class="wizard-card-desc">Master artisan or enterprise</span>
-          </label>
+
+        <!-- Right Column: Business Plan Launch Panel -->
+        <div class="wizard-right-panel">
+          <div class="wizard-summary-badge">⚡ AI Feasibility Engine</div>
+          <div class="wizard-summary-heading">Ready to Plan?</div>
+          <div class="wizard-summary-desc">We will tailor product suggestions, equipment requirements, and profit calculations based on your selected criteria:</div>
+
+          <div class="wizard-live-summary">
+            <div class="summary-pill"><span class="summary-pill-label">Skill</span><strong id="summaryPillSkill">Beginner</strong></div>
+            <div class="summary-pill"><span class="summary-pill-label">Budget</span><strong id="summaryPillBudget">Under ₹5K</strong></div>
+            <div class="summary-pill"><span class="summary-pill-label">Timeline</span><strong id="summaryPillSpeed">Quick</strong></div>
+            <div class="summary-pill"><span class="summary-pill-label">Region</span><strong id="summaryPillRegion">All Regions</strong></div>
+          </div>
+
+          <div class="wizard-perks-list">
+            <div class="perk-item">✓ Live e-commerce demand benchmarks</div>
+            <div class="perk-item">✓ Step-by-step artisan guides</div>
+            <div class="perk-item">✓ Monthly profit calculator & margins</div>
+          </div>
+
+          <button class="blueprint-cta-btn wizard-side-btn" type="submit">
+            🎯 Generate My Business Plan
+          </button>
+          <div class="wizard-sub-hint">⚡ Generates in ~5 seconds</div>
         </div>
       </div>
-
-      <div class="wizard-step-group">
-        <div class="wizard-step-title">
-          <span class="wizard-step-number">2</span>
-          What is your starting budget?
-        </div>
-        <div class="wizard-card-options">
-          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
-            <input type="radio" name="budget_constraint" value="Low" checked style="display:none">
-            <span class="wizard-card-icon">🌱</span>
-            <span class="wizard-card-text">Low Budget</span>
-            <span class="wizard-card-desc">Under ₹5,000</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="budget_constraint" value="Medium" style="display:none">
-            <span class="wizard-card-icon">🌿</span>
-            <span class="wizard-card-text">Medium</span>
-            <span class="wizard-card-desc">₹5,000 – ₹25,000</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="budget_constraint" value="High" style="display:none">
-            <span class="wizard-card-icon">🌳</span>
-            <span class="wizard-card-text">Commercial</span>
-            <span class="wizard-card-desc">Over ₹25,000</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="wizard-step-group">
-        <div class="wizard-step-title">
-          <span class="wizard-step-number">3</span>
-          How quickly do you need results?
-        </div>
-        <div class="wizard-card-options">
-          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
-            <input type="radio" name="production_time" value="Quick turnaround" checked style="display:none">
-            <span class="wizard-card-icon">⚡</span>
-            <span class="wizard-card-text">Quick</span>
-            <span class="wizard-card-desc">Start earning in days</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="production_time" value="Moderate" style="display:none">
-            <span class="wizard-card-icon">📅</span>
-            <span class="wizard-card-text">Moderate</span>
-            <span class="wizard-card-desc">A few weeks to setup</span>
-          </label>
-          <label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="production_time" value="Long-term" style="display:none">
-            <span class="wizard-card-icon">🏗️</span>
-            <span class="wizard-card-text">Long-term</span>
-            <span class="wizard-card-desc">Invest for bigger returns</span>
-          </label>
-        </div>
-      </div>
-
-      ${uniqueStates.length > 0 ? `<div class="wizard-step-group">
-        <div class="wizard-step-title">
-          <span class="wizard-step-number">4</span>
-          Which region are you in?
-        </div>
-        <div class="wizard-card-options">
-          <label class="wizard-card-option selected" onclick="selectWizardOption(this)">
-            <input type="radio" name="region_context" value="All listed regions" checked style="display:none">
-            <span class="wizard-card-icon">🗺️</span>
-            <span class="wizard-card-text">All Regions</span>
-          </label>
-          ${uniqueStates.map(state => `<label class="wizard-card-option" onclick="selectWizardOption(this)">
-            <input type="radio" name="region_context" value="${escapeHtml(state)}" style="display:none">
-            <span class="wizard-card-icon">📍</span>
-            <span class="wizard-card-text">${escapeHtml(state)}</span>
-          </label>`).join('')}
-        </div>
-      </div>` : '<input type="hidden" name="region_context" value="All listed regions">'}
-
-      <label class="motif-field">
-        <span style="font-size:14px;font-weight:600;color:var(--text-secondary)">Cultural motifs (optional)</span>
-        <input name="cultural_motifs" maxlength="280" placeholder="e.g., Gond patterns, Warli art, local tribal designs">
-      </label>
-
-      <button class="blueprint-cta-btn" type="submit">
-        🎯 Generate My Business Plan
-      </button>
     </form>
+    </div>
     <div id="recommendationResults"></div>`;
 }
 
-function selectWizardOption(label) {
+// Map region selection to cultural motif suggestion
+function updateMotifSuggestion(dropdown) {
+  const mfpId = dropdown.id.replace('regionDropdown_', '');
+  const region = dropdown.value;
+  const label = document.getElementById('motifLabel_' + mfpId);
+  const checkbox = document.getElementById('motifCheckbox_' + mfpId);
+  const hiddenInput = document.getElementById('motifValue_' + mfpId);
+  const pillRegion = document.getElementById('summaryPillRegion');
+  if (pillRegion) pillRegion.textContent = region === 'All listed regions' ? 'All Regions' : region;
+  
+  const regionMotifs = {
+    'Madhya Pradesh': 'Gond art patterns',
+    'Maharashtra': 'Warli art patterns',
+    'Rajasthan': 'Mandana / Phad art',
+    'Odisha': 'Pattachitra / Saura art',
+    'Jharkhand': 'Sohrai / Khovar art',
+    'Chhattisgarh': 'Pithora / Dhokra patterns',
+    'Gujarat': 'Rogan / Ahir embroidery motifs',
+    'West Bengal': 'Patachitra / Kantha motifs',
+    'Andhra Pradesh': 'Cheriyal / Nirmal art',
+    'Telangana': 'Cheriyal scroll motifs',
+    'Karnataka': 'Lambani / Mysore motifs',
+    'Tamil Nadu': 'Kolam / Tanjore motifs',
+    'Kerala': 'Mural / Theyyam motifs',
+    'Bihar': 'Madhubani art patterns',
+    'Uttarakhand': 'Aipan art patterns',
+    'Himachal Pradesh': 'Chamba Rumal / Kinnauri motifs',
+    'Assam': 'Muga silk / Jaapi motifs',
+  };
+
+  const motif = regionMotifs[region];
+  if (motif) {
+    label.textContent = `Include ${motif} in your product designs?`;
+    if (checkbox.checked) hiddenInput.value = motif;
+  } else {
+    label.textContent = 'Include local tribal art motifs in designs?';
+    if (checkbox.checked) hiddenInput.value = 'Traditional tribal designs';
+  }
+}
+
+function toggleMotifInput(mfpId) {
+  const checkbox = document.getElementById('motifCheckbox_' + mfpId);
+  const hiddenInput = document.getElementById('motifValue_' + mfpId);
+  const dropdown = document.getElementById('regionDropdown_' + mfpId);
+
+  if (checkbox.checked) {
+    const regionMotifs = {
+      'Madhya Pradesh': 'Gond art patterns', 'Maharashtra': 'Warli art patterns',
+      'Rajasthan': 'Mandana / Phad art', 'Odisha': 'Pattachitra / Saura art',
+      'Jharkhand': 'Sohrai / Khovar art', 'Chhattisgarh': 'Pithora / Dhokra patterns',
+      'Gujarat': 'Rogan / Ahir embroidery motifs', 'West Bengal': 'Patachitra / Kantha motifs',
+      'Bihar': 'Madhubani art patterns', 'Uttarakhand': 'Aipan art patterns',
+    };
+    const region = dropdown ? dropdown.value : '';
+    hiddenInput.value = regionMotifs[region] || 'Traditional tribal designs';
+  } else {
+    hiddenInput.value = '';
+  }
+}
+
+function selectWizardOption(label, type, text) {
   const group = label.closest('.wizard-card-options');
   group.querySelectorAll('.wizard-card-option').forEach(opt => opt.classList.remove('selected'));
   label.classList.add('selected');
   label.querySelector('input').checked = true;
+
+  if (type === 'skill') {
+    const el = document.getElementById('summaryPillSkill');
+    if (el) el.textContent = text;
+  } else if (type === 'budget') {
+    const el = document.getElementById('summaryPillBudget');
+    if (el) el.textContent = text;
+  } else if (type === 'speed') {
+    const el = document.getElementById('summaryPillSpeed');
+    if (el) el.textContent = text;
+  }
 }
 
 async function submitRecommendations(event, mfpId) {
@@ -1030,13 +1183,16 @@ async function submitRecommendations(event, mfpId) {
     cultural_motifs: (formData.get('cultural_motifs') || '').trim() || null
   };
   const results = document.getElementById('recommendationResults');
+  const formWrapper = document.getElementById('wizardFormWrapper');
   const key = recommendationCacheKey(mfpId, constraints, market);
   if (recommendationCache[key]) {
+    if (formWrapper) formWrapper.style.display = 'none';
     results.innerHTML = renderRecommendationResults(recommendationCache[key], true);
     return;
   }
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
+  button.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin-right:8px;display:inline-block;vertical-align:middle"></div> Creating your plan...';
   results.innerHTML = '<div class="market-loading"><div class="spinner"></div><p>Creating your custom business plan...</p></div>';
   try {
     const data = await api('/api/materials/' + mfpId + '/recommend', {
@@ -1045,12 +1201,20 @@ async function submitRecommendations(event, mfpId) {
       body: JSON.stringify({ ...constraints, market_context: recommendationEvidence(market) })
     });
     recommendationCache[key] = data;
+    if (formWrapper) formWrapper.style.display = 'none';
     results.innerHTML = renderRecommendationResults(data, false);
   } catch (error) {
     results.innerHTML = '<div class="error-box">Recommendation generation failed: ' + escapeHtml(error.message) + '</div>';
-  } finally {
     button.disabled = false;
+    button.innerHTML = '🎯 Generate My Business Plan';
   }
+}
+
+function showWizardAgain() {
+  const formWrapper = document.getElementById('wizardFormWrapper');
+  const results = document.getElementById('recommendationResults');
+  if (formWrapper) formWrapper.style.display = '';
+  if (results) results.innerHTML = '';
 }
 
 function renderRecommendationResults(data, fromCache) {
@@ -1134,7 +1298,7 @@ function renderRecommendationResults(data, fromCache) {
     </div>
   `;
   
-  return '<div class="recommendation-result-header">' + (fromCache ? 'Session result' : 'New recommendations') + '</div><div class="recommendation-grid">' + cards + '</div>' + profitCalcHtml;
+  return '<div class="rec-results-top-bar"><button class="rec-regenerate-btn" onclick="showWizardAgain()">🔄 Change Preferences & Regenerate</button></div><div class="recommendation-grid">' + cards + '</div>' + profitCalcHtml;
 }
 
 function renderProfitBanner(rec) {
@@ -1305,9 +1469,51 @@ function filterEquipment(level, btn) {
   activeEquipFilter = level;
   document.querySelectorAll('.equip-option').forEach(el => el.classList.remove('active'));
   if(btn) btn.classList.add('active');
+
+  // Normalize difficulty: map various LLM strings to our 3 buckets
+  function normalizeDifficulty(raw) {
+    const d = (raw || 'medium').toLowerCase().trim();
+    if (d === 'easy' || d === 'beginner' || d === 'simple' || d === 'basic') return 'easy';
+    if (d === 'hard' || d === 'difficult' || d === 'advanced' || d === 'complex' || d === 'expert') return 'hard';
+    return 'medium'; // medium, moderate, intermediate, or anything else
+  }
+
+  // Filter individual process-cards
   document.querySelectorAll('.process-card').forEach(card => {
-    if(level === 'all' || card.dataset.difficulty === level) card.style.display = '';
-    else card.style.display = 'none';
+    const cardDiff = normalizeDifficulty(card.dataset.difficulty);
+    if (level === 'all' || cardDiff === level) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+
+  // Handle accordion parents: hide categories with zero visible products, expand those with visible ones
+  document.querySelectorAll('.accordion-item').forEach(accordion => {
+    const body = accordion.querySelector('.accordion-body');
+    if (!body) return;
+    const visibleCards = body.querySelectorAll('.process-card:not([style*="display: none"])');
+    const totalCards = body.querySelectorAll('.process-card');
+
+    if (visibleCards.length === 0) {
+      // Hide entire accordion section when no products match the filter
+      accordion.style.display = 'none';
+    } else {
+      accordion.style.display = '';
+      // Auto-expand accordion if a filter is active (so user can see results immediately)
+      if (level !== 'all') {
+        accordion.classList.add('open');
+      }
+      // Update the product count badge
+      const countEl = accordion.querySelector('.cat-count');
+      if (countEl) {
+        if (level === 'all') {
+          countEl.textContent = `${totalCards.length} product${totalCards.length !== 1 ? 's' : ''}`;
+        } else {
+          countEl.textContent = `${visibleCards.length} of ${totalCards.length} product${totalCards.length !== 1 ? 's' : ''}`;
+        }
+      }
+    }
   });
 }
 
