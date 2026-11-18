@@ -51,6 +51,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Additive assistant integration; disabled by default and independent of main LLM settings.
+from app.assistant.router import router as assistant_router, AssistantContextMiddleware
+app.include_router(assistant_router)
+app.add_middleware(AssistantContextMiddleware)
+
 
 @app.get("/api/health/local-llm")
 def api_local_llm_health():
@@ -218,11 +223,23 @@ def api_enhance_product(mfp_id: int, request: EnhancementRequest):
 # ── Static Files (Frontend) ─────────────────────────────────────────────────
 
 STATIC_DIR = Path(__file__).parent / "static"
+REACT_DIR = PROJECT_ROOT / "frontend" / "dist"
 
 
 @app.get("/")
 def serve_index():
-    return FileResponse(STATIC_DIR / "index.html")
+    # Serve the verified React build when installed; preserve no-Node startup fallback.
+    index = REACT_DIR / "index.html"
+    return FileResponse(
+        index if index.is_file() else STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/legacy", include_in_schema=False)
+def serve_legacy_index():
+    """Rollback view; business API contracts are shared with the React frontend."""
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -232,6 +249,7 @@ def favicon():
 
 # Mount static assets (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/ui", StaticFiles(directory=str(REACT_DIR), html=True, check_dir=False), name="react")
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────

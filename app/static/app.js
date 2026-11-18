@@ -73,7 +73,12 @@ async function api(url, options = {}) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
     throw new Error(err.detail || resp.statusText);
   }
-  return resp.json();
+  const data = await resp.json();
+  // Passive assistant hook: no modification to the response or business workflow.
+  window.dispatchEvent(new CustomEvent('maerii:response', { detail: {
+    url, data, contextRef: resp.headers.get('x-maerii-assistant-context')
+  }}));
+  return data;
 }
 
 // ── Material List ──────────────────────────────────────────────────────────
@@ -171,6 +176,7 @@ function filterMaterials() {
 
 async function selectMaterial(mfpId) {
   activeMfpId = mfpId;
+  window.dispatchEvent(new CustomEvent('maerii:selection', {detail: {material_id: mfpId, section: 'overview'}}));
 
   // Update sidebar active state
   document.querySelectorAll(".material-item").forEach(el => {
@@ -349,6 +355,7 @@ function renderDetail(data) {
 // ── Tab Switching ──────────────────────────────────────────────────────────
 
 function switchTab(tabName, btnEl) {
+  window.dispatchEvent(new CustomEvent('maerii:section', {detail: {section: tabName}}));
   // Update tab buttons
   document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
   btnEl.classList.add('active');
@@ -1218,6 +1225,7 @@ function showWizardAgain() {
 }
 
 function renderRecommendationResults(data, fromCache) {
+  window.dispatchEvent(new CustomEvent('maerii:display', {detail: {data, task: 'recommendations'}}));
   const recommendations = data.recommendations || [];
   if (!recommendations.length) return '<div class="error-box">No recommendations were returned.</div>';
   const cards = recommendations.map((item, index) => {
@@ -1671,6 +1679,7 @@ async function fetchEnhancement(mfpId, recommendation, cacheKey) {
 }
 
 function renderEnhancementContent(data, recommendation, mfpId) {
+  window.dispatchEvent(new CustomEvent('maerii:display', {detail: {data, task: 'marketing', product: recommendation.product_name}}));
   const body = document.querySelector('.enhancement-modal-body');
   if (!body) return;
 

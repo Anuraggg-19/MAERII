@@ -1,0 +1,323 @@
+/* Additive React layout/accessibility corrections; legacy tokens remain canonical. */
+.react-app [hidden] {
+  display: none !important;
+}
+.react-app button,
+.react-app input,
+.react-app select,
+.react-app textarea {
+  font: inherit;
+}
+.react-app button {
+  cursor: pointer;
+}
+.react-app button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.react-app :focus-visible {
+  outline: 3px solid var(--warm-gold);
+  outline-offset: 3px;
+}
+.react-app .app-container {
+  height: 100dvh;
+}
+.react-app .main-content {
+  min-width: 0;
+  padding-bottom: 100px;
+  overflow-wrap: anywhere;
+}
+.material-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  font: inherit;
+}
+.material-button .mat-name,
+.material-button .mat-meta {
+  display: block;
+}
+.react-app .material-item.active {
+  background: var(--bg-active);
+  border-left: 3px solid var(--accent);
+}
+.plain-button {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.react-app fieldset {
+  border: 0;
+  min-width: 0;
+}
+.react-app legend {
+  padding: 0;
+}
+.react-app .wizard-card-option {
+  min-width: 0;
+}
+.react-app .wizard-card-option input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+.react-app .wizard-motif-toggle input {
+  flex-shrink: 0;
+}
+.react-app .wizard-motif-toggle {
+  line-height: 1.5;
+}
+.react-app .artisan-details {
+  margin-top: 12px;
+}
+.react-app summary {
+  cursor: pointer;
+}
+.react-app .artisan-guide {
+  padding-left: 24px;
+}
+.react-app .process-timeline {
+  list-style: none;
+}
+.react-app .timeline-step {
+  gap: 14px;
+}
+.evidence-stamp {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 10px 0 20px;
+}
+.rec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.rec-actions button {
+  padding: 10px 14px;
+}
+.react-app .profit-product-select {
+  max-width: 100%;
+}
+.blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 20px;
+}
+.blueprint-grid .enh-section {
+  min-width: 0;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+}
+.blueprint-values {
+  padding-left: 20px;
+}
+.blueprint-values > li {
+  margin-bottom: 12px;
+}
+.blueprint-fields dt {
+  font-weight: 650;
+  text-transform: capitalize;
+  color: var(--text-secondary);
+}
+.blueprint-fields dd {
+  margin: 3px 0 12px;
+}
+.blueprint-swatch {
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.enhancement-modal {
+  max-height: 90dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.enhancement-modal-header {
+  flex-shrink: 0;
+}
+.enhancement-modal-body {
+  min-height: 0;
+  overflow: auto;
+}
+.enhancement-modal .evidence-stamp {
+  padding: 0 20px;
+}
+.enhancement-modal p {
+  overflow-wrap: anywhere;
+}
+.enhancement-tabs {
+  flex-wrap: wrap;
+}
+.mobile-only,
+.mobile-toolbar {
+  display: none;
+}
+.skip-link {
+  position: fixed;
+  left: 10px;
+  top: -80px;
+  background: var(--bg-card);
+  padding: 10px;
+  z-index: 5000;
+}
+.skip-link:focus {
+  top: 10px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 1000px) {
+  .react-app .wizard-layout-split {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+  .react-app .wizard-right-panel {
+    width: auto;
+    max-width: none;
+  }
+  .react-app .wizard-grid-2x2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .react-app .detail-tab {
+    min-width: 0;
+    padding: 10px 5px;
+  }
+  .react-app .tab-subtitle {
+    display: none;
+  }
+  .react-app .sidebar {
+    width: 260px;
+    min-width: 260px;
+  }
+}
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+  .mobile-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .react-app .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(320px, 88vw);
+    height: 100dvh;
+    z-index: 1500;
+    transform: translateX(-100%);
+  }
+  .react-app .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    background: #0006;
+    z-index: 1499;
+    border: 0;
+  }
+  .react-app .main-content {
+    padding: 14px 12px 100px;
+    width: 100%;
+  }
+  .react-app .detail-tabs {
+    gap: 3px;
+    padding: 4px;
+    position: static;
+  }
+  .react-app .detail-tab {
+    font-size: 12px;
+    min-height: 64px;
+    flex: 1;
+  }
+  .react-app .tab-label {
+    font-size: 12px;
+    white-space: normal;
+  }
+  .react-app .section-grid,
+  .react-app .human-props-grid,
+  .react-app .scores-section,
+  .react-app .recommendation-grid {
+    grid-template-columns: 1fr;
+  }
+  .react-app .score-card.wide {
+    grid-column: auto;
+  }
+  .react-app .product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .react-app .filter-bar,
+  .react-app .product-header-row,
+  .react-app .profit-calc-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .react-app .value-multiplier-banner {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .react-app .market-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .react-app .wizard-grid-2x2 {
+    grid-template-columns: 1fr;
+  }
+  .react-app .wizard-card-options {
+    flex-wrap: wrap;
+  }
+  .react-app .profit-slider-row {
+    flex-wrap: wrap;
+  }
+  .react-app .profit-result-grid {
+    grid-template-columns: 1fr;
+  }
+  .react-app .recommendation-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .blueprint-grid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+  .enhancement-modal {
+    width: 96vw;
+    max-height: 94dvh;
+  }
+}
+@media (max-width: 420px) {
+  .react-app .product-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-app *,
+  .enhancement-overlay * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
