@@ -27,3 +27,9 @@ maerii_deep_dive.md
 candidate_screening_architecture.md
 venv/
 .env.example
+!app/assistant/.env.example
+
+# React build and local QA artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
